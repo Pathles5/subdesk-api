@@ -141,7 +141,7 @@ if ($currentPhase) {
     }
 }
 
-# --- Project gates once package.json exists (phase 02+) ---
+# --- Supply-chain asserts (constitution I4b, decision D-30; active from phase 02) ---
 $pkgPath = Join-Path $RepoRoot "package.json"
 if (Test-Path $pkgPath) {
     try {
@@ -154,10 +154,62 @@ if (Test-Path $pkgPath) {
             }
         }
         if ($pkg.scripts -and $pkg.scripts.check -notmatch "check\.ps1") {
-            Add-Note "npm run check does not wrap scripts/check.ps1 (allowed, but document it)."
+            Add-Note "pnpm run check does not wrap scripts/check.ps1 (allowed, but document it)."
         }
         if ($pkg.type -ne "module") { Add-Note "package.json is not ESM ('type' != 'module'); confirm against phase 00 decision." }
         else { Add-Note "ESM project (type: module) as required by the brief." }
+
+        # pnpm is the only allowed package manager (I4b).
+        $pm = "$($pkg.packageManager)"
+        if ($pm -notmatch '^pnpm@\d+\.\d+\.\d+$') {
+            Add-Fail "package.json packageManager must pin an exact pnpm version (got '$pm'); npm/yarn are forbidden (I4b / D-30)."
+        } else {
+            Add-Note "packageManager pinned: $pm."
+        }
+        foreach ($alien in @("package-lock.json", "yarn.lock", "bun.lockb", "npm-shrinkwrap.json")) {
+            if (Test-Path (Join-Path $RepoRoot $alien)) {
+                Add-Fail "Lockfile of another package manager committed: $alien (I4b / D-30)."
+            }
+        }
+        if (-not (Test-Path (Join-Path $RepoRoot "pnpm-lock.yaml"))) {
+            Add-Fail "Missing pnpm-lock.yaml: dependencies are not pinned by a frozen lockfile (I4b)."
+        }
+        $wsPath = Join-Path $RepoRoot "pnpm-workspace.yaml"
+        if (-not (Test-Path $wsPath)) {
+            Add-Fail "Missing pnpm-workspace.yaml: supply-chain settings (ignoreScripts, strictDepBuilds) must live there (I4b)."
+        } else {
+            $ws = Get-Content $wsPath -Raw -Encoding UTF8
+            foreach ($setting in @("ignoreScripts", "strictDepBuilds", "allowBuilds", "minimumReleaseAge", "trustPolicy", "blockExoticSubdeps")) {
+                if ($ws -notmatch "(?m)^\s*$setting\s*:") {
+                    Add-Fail "pnpm-workspace.yaml lacks '$setting' (I4b / D-30)."
+                }
+            }
+            if ($ws -match "(?i)dangerouslyAllowAllBuilds\s*:\s*true") {
+                Add-Fail "pnpm-workspace.yaml enables dangerouslyAllowAllBuilds: dependency scripts would run (I4b)."
+            }
+            foreach ($entry in ([regex]::Matches($ws, '(?mi)^\s*allowBuilds\s*:([\s\S]*?)(\r?\n\S|\z)'))) {
+                $body = $entry.Groups[1].Value
+                $listed = ([regex]::Matches($body, '(?m)^\s*-\s*["'']?([A-Za-z0-9@/_.-]+)')).Count
+                if ($listed -gt 0) { Add-Note "allowBuilds lists $listed approved dependency build script(s): verify each has a DECISIONS.md entry (I4b)." }
+            }
+            if ($ws -match "(?i)^\s*pnpmfile\s*:") { Add-Fail "pnpmfile declared: it can execute code during resolution; requires a registered decision (I4b)." }
+        }
+        foreach ($depKey in @("dependencies", "devDependencies", "optionalDependencies")) {
+            if ($pkg.$depKey) {
+                foreach ($p in $pkg.$depKey.PSObject.Properties) {
+                    if ($p.Value -match '^(git|github|http|file|link|workspace|npm):|\.tar\.gz|^[^/]+@.*:') {
+                        Add-Fail "Exotic dependency spec '$($p.Name)@$($p.Value)' in $depKey (I4b): requires an explicit registered decision."
+                    }
+                }
+            }
+        }
+        if ($pkg.PSObject.Properties.Name -contains "scripts") {
+            foreach ($p in $pkg.scripts.PSObject.Properties) {
+                if ($p.Value -match '(?i)\b(npm|yarn|npx)\s+(install|ci|add|run|exec|dlx)\b') {
+                    Add-Fail "script '$($p.Name)' calls $($matches[1]): package manager commands must use pnpm (I4b / D-30)."
+                }
+            }
+        }
     } catch {
         Add-Fail "package.json is not valid JSON: $($_.Exception.Message)"
     }
@@ -189,16 +241,16 @@ if (Test-Path $workflowDir) {
 # --- Secret hygiene scan (D-13 / I4) ---
 if (-not $SkipSecretScan) {
     $excludeRegex = '\\(\.git|node_modules|dist|build|coverage|\.serverless|\.aws-sam|\.output)\\'
-    $exts = @(".md", ".js", ".mjs", ".cjs", ".ts", ".json", ".yml", ".yaml", ".ps1", ".txt", ".example")
+    $exts = @(".md", ".js", ".mjs", ".cjs", ".ts", ".json", ".yml", ".yaml", ".ps1", ".txt", ".example", ".mmd", ".html", ".graphql")
     $patterns = @(
         @{ name = "Telegram bot token shape"; regex = '\d{8,10}:AA[A-Za-z0-9_-]{25,}' },
         @{ name = "AWS access key id";        regex = 'AKIA[0-9A-Z]{16}' },
         @{ name = "AWS secret key literal";   regex = '(?i)(aws_)?secret_access_key["'']?\s*[:=]\s*["'']?[A-Za-z0-9/+=]{35,}' },
         @{ name = "Project secret literal";   regex = '(?i)(telegram_bot_token|admin_api_key|telegram_webhook_secret)["'']?\s*[:=]\s*["'']?[A-Za-z0-9_/+=-]{16,}' }
     )
-    $candidates = Get-ChildItem $RepoRoot -File -Recurse -ErrorAction SilentlyContinue |
+    $candidates = Get-ChildItem $RepoRoot -File -Recurse -Force -ErrorAction SilentlyContinue |
         Where-Object {
-            ($exts -contains $_.Extension.ToLower()) -and
+            (($exts -contains $_.Extension.ToLower()) -or ($_.Name -in @(".npmrc", ".nvmrc", "pnpm-workspace.yaml", ".gitignore"))) -and
             ($_.FullName -notmatch $excludeRegex) -and
             ($_.Name -notin @("check.ps1")) -and
             ($_.Length -lt 400KB)
@@ -282,7 +334,101 @@ if ($cfnFiles.Count -gt 0) {
     }
     if ($iacRaw -match 'arn:aws:iam::\*|Resource:\s*"?\*"') { Add-Fail "IaC asserts: wildcard IAM resource/policy detected (I4 least privilege)." }
 } else {
-    Add-Note "No IaC file yet (template.yaml / serverless.yml) - expected before phase 03."
+    Add-Note "No IaC template yet (template.yaml) - expected before phase 03."
+}
+
+# --- Documentation for humans asserts (constitution I8, decision D-32) ---
+$docIndex = Join-Path $RepoRoot "docs/human/README.md"
+if (-not (Test-Path $docIndex)) {
+    Add-Fail "I8: missing docs/human/README.md (index of the human documentation with the freshness table)."
+}
+
+[int]$curPhaseNum = 0
+if ($currentPhase) { [int]::TryParse($currentPhase, [ref]$curPhaseNum) | Out-Null }
+$lastClosedNum = 0
+if (Test-Path $indexPath) {
+    foreach ($row in (Get-Content $indexPath -Encoding UTF8 | Where-Object { $_ -match '^\s*\|\s*\d+\s*\|' })) {
+        $cells = ($row.TrimStart() -replace '^\|', '' -replace '\|$', '') -split '\|'
+        if ($cells.Count -lt 3) { continue }
+        $st = $cells[2].Trim().ToLower()
+        $num = 0
+        if ([int]::TryParse($cells[0].Trim(), [ref]$num) -and ($completedStates -contains $st) -and $num -gt $lastClosedNum) { $lastClosedNum = $num }
+    }
+}
+
+# required human-doc artefact -> phase from which it is mandatory
+$docRequired = @(
+    @{ from = 0; rel = "docs/human/technical/architecture.md";       what = "technical architecture" },
+    @{ from = 1; rel = "docs/api/openapi.yaml";                      what = "OpenAPI contract" },
+    @{ from = 1; rel = "docs/human/functional/api.md";               what = "functional API documentation" },
+    @{ from = 1; rel = "docs/human/technical/data-model.md";         what = "data model documentation" },
+    @{ from = 2; rel = "README.md";                                  what = "root README" },
+    @{ from = 2; rel = "CHANGELOG.md";                               what = "changelog" },
+    @{ from = 2; rel = "docs/human/technical/operations.md";         what = "operations documentation" },
+    @{ from = 3; rel = "docs/human/runbook.md";                      what = "runbook" },
+    @{ from = 3; rel = "docs/human/diagrams/deployment.mmd";         what = "deployment diagram (Mermaid source)" },
+    @{ from = 3; rel = "docs/human/diagrams/component.mmd";          what = "component diagram (Mermaid source)" },
+    @{ from = 4; rel = "docs/human/diagrams/api-flow.mmd";           what = "API flow diagram (Mermaid source)" },
+    @{ from = 9; rel = "docs/human/functional/product.md";           what = "functional product documentation" },
+    @{ from = 9; rel = "docs/human/technical/decisions-summary.md";  what = "human-readable decisions summary" }
+)
+
+$docsChecked = 0
+foreach ($doc in $docRequired) {
+    if ($curPhaseNum -lt $doc.from) { continue }
+    $p = Join-Path $RepoRoot $doc.rel
+    if (-not (Test-Path $p)) {
+        Add-Fail ("I8: required documentation missing since phase {0:D2}: {1} ({2})." -f $doc.from, $doc.rel, $doc.what)
+        continue
+    }
+    $docsChecked++
+    $raw = Get-Content $p -Raw -Encoding UTF8 -ErrorAction SilentlyContinue
+    if ($raw -notmatch "(?i)actualizado:\s*fase\s*(\d+)") {
+        Add-Fail ("I8: {0} lacks the 'Actualizado: fase NN' freshness marker." -f $doc.rel)
+    } else {
+        $marker = [int]$matches[1]
+        if ($marker -lt $lastClosedNum) {
+            Add-Fail ("I8: {0} is stale: marked as updated in phase {1:D2}, but phase {2:D2} is already closed. Update the docs before closing this one." -f $doc.rel, $marker, $lastClosedNum)
+        }
+        if ($raw -notmatch "\d{4}-\d{2}-\d{2}") {
+            Add-Note ("I8: {0} has a phase marker without an ISO date next to it." -f $doc.rel)
+        }
+    }
+    if ($raw -match "(?i)\b(TODO|WIP|pendiente de redactar)\b") {
+        Add-Note ("I8: {0} still contains a TODO/WIP placeholder." -f $doc.rel)
+    }
+}
+if ($docsChecked -gt 0) { Add-Note "I8: $docsChecked required human-documentation artefact(s) present and fresh (last closed phase: $lastClosedNum)." }
+
+# Root README must teach the real, runnable commands once it exists.
+$readmePath = Join-Path $RepoRoot "README.md"
+if (Test-Path $readmePath) {
+    $readmeRaw = Get-Content $readmePath -Raw -Encoding UTF8
+    foreach ($cmd in @("pnpm install --frozen-lockfile", "pnpm run lint", "pnpm test", "pnpm run dev")) {
+        if ($readmeRaw -notmatch [regex]::Escape($cmd)) {
+            Add-Fail "I8: README.md does not document the runnable command '$cmd'."
+        }
+    }
+    if ((Test-Path $workflowDir) -and ($readmeRaw -notmatch "(?i)setWebhook")) {
+        Add-Fail "I8: README.md lacks the exact setWebhook curl although CI workflows exist (phase 08 gate)."
+    }
+}
+
+# OpenAPI contract shape, once it exists (drift itself is caught by the contract test).
+$openapiPath = Join-Path $RepoRoot "docs/api/openapi.yaml"
+if (Test-Path $openapiPath) {
+    $oaRaw = Get-Content $openapiPath -Raw -Encoding UTF8
+    if ($oaRaw -notmatch "(?m)^openapi:\s*3\.\d") { Add-Fail "I8: docs/api/openapi.yaml is not OpenAPI 3.x (I8d)." }
+    if ($oaRaw -notmatch "(?m)^\s*info:") { Add-Fail "I8: openapi.yaml lacks an 'info' block (title + version)." }
+    $pathCount = ([regex]::Matches($oaRaw, '(?m)^\s{2}/[A-Za-z0-9{}/._-]+:\s*$')).Count
+    if ($pathCount -lt 3) {
+        Add-Fail ("I8: openapi.yaml declares {0} path(s); the contract has 4 endpoints over 3 paths (I3)." -f $pathCount)
+    } else {
+        Add-Note "I8: openapi.yaml declares $pathCount path(s)."
+    }
+    if ($curPhaseNum -ge 2 -and -not (Test-Path (Join-Path $RepoRoot "tests/contract"))) {
+        Add-Fail "I8: no tests/contract/ directory: the code-vs-openapi drift test is mandatory from phase 02 (I8b.4)."
+    }
 }
 
 # --- Report ---

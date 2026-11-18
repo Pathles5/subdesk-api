@@ -3,6 +3,14 @@
 > **Esto no es una especificación cerrada.** Es un brief de producto y un mandato de ingeniería. Tú tomas las decisiones de arquitectura y desarrollo. No ejecutes una receta: propone, justifica, construye y documenta.
 > El nombre visible del proyecto (`SubDesk API`) es provisional; el repo es `subdesk-api`.
 
+> **⚠️ Nota de vigencia (2026-11-18).** Este brief se mantiene como **histórico**. Tres puntos de sus §4/§5 han sido **sustituidos por decisión explícita del usuario** y la regla operativa vive en `docs/specs/constitution.md` + `DECISIONS.md`:
+> 1. §4/§5.5 *"IaC: Serverless Framework o AWS SAM"* → **AWS SAM** (D-15).
+> 2. §4/§5.6 *"API Gateway HTTP API"* → **Lambda Function URL** (D-27): la franquicia de HTTP API caduca a los 12 meses y la Function URL no factura por petición (I2).
+> 3. §2/§5.4 *"DynamoDB `PAY_PER_REQUEST`"* → **`PROVISIONED` 25/25, auto scaling OFF** (D-26): la franquicia mensual de peticiones solo existe en modo provisioned; la migración a bajo demanda queda prevista como vía de escape futura (D-29) y exige OK del usuario.
+> 4. §6.1 *"estructura limpia (`src/handlers/`)"* → **1 sola Lambda con Express dentro** (`src/lambda.js` + `src/routes/`), por D-27.
+> 5. Uso implícito de **npm** (y las deps `axios`/`node-fetch`/`uuid` que sugería) → **pnpm como único gestor**, con configuración endurecida en `pnpm-workspace.yaml`, `fetch` nativo y `crypto.randomUUID()` (D-30, constitución I4b).
+
+
 ---
 
 ## 1. Mandato
@@ -132,7 +140,7 @@ Llamada a `sendMessage`, actualización a `RESOLVED` **solo si Telegram responde
 ### Fase 09 — Hardening y entrega
 `README.md`, revisión de coste/cuotas, límites conocidos, informe final.
 
-Al final de cada fase ejecuta las compuertas (`scripts/check.ps1` + `npm run lint` + `npm test`, y las de IaC cuando aplique). Si algo falla, corrígelo antes de continuar.
+Al final de cada fase ejecuta las compuertas (`scripts/check.ps1` + `pnpm run lint` + `pnpm test`, y `pnpm run validate:iac` = `cfn-lint` cuando aplique; npm/yarn prohibidos por I4b). Si algo falla, corrígelo antes de continuar.
 
 ---
 

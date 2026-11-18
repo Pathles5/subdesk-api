@@ -16,9 +16,10 @@ draft → spec → tasks → [por tarea: propose·validate → implement] → ve
 2. **Tasks.** Descomponer en `docs/specs/NN-<nombre>/tasks.md` con la tabla de `docs/harness/tasks-format.md`. Las casillas las marca el orquestador, o el documentador bajo su orden.
 3. **Propose·validate (OBLIGATORIO para cada tarea, D-07).** Antes de pasar una tarea al implementador, el **planteamiento de la solución** se muestra al usuario y queda validado por él. Sin visto del usuario no hay implement. Esto incluye las soluciones que propongan los subagentes: el subagente propone; el usuario valida; el implementador ejecuta.
 4. **Implement.** Solo lo que cubren spec y tasks, ejecutando la solución validada. Trabajo no previsto: o se amplía la spec (con nota de motivo y registro en `DECISIONS.md`) o se anota como pendiente de otra fase.
-5. **Verify.** Ejecutar `powershell -File scripts/check.ps1` (compuerta documental del harness). Desde Fase 02, además `npm run lint` y `npm test`. Desde Fase 03, además la validación de IaC **sin desplegar** (`npm run validate:iac` o el comando elegido en Fase 00). Si falla, arreglar antes de avanzar.
+5. **Verify.** Ejecutar `powershell -File scripts/check.ps1` (compuerta documental + asserts de IaC + asserts de cadena de suministro + **frescura de `docs/human/**` (I8)** + higiene de secretos). Dependencias siempre con **`pnpm install --frozen-lockfile`** (npm/yarn prohibidos, I4b). Desde Fase 02, además `pnpm run lint`, `pnpm test` y `pnpm run validate:api`. Desde Fase 03, además `pnpm run validate:iac` = **`cfn-lint template.yaml`** (offline, sin credenciales, sin ejecutar scripts de dependencias; `sam build` **no** es compuerta: AWS documenta que corre *package manager scripts*, D-31). Si algo falla, arreglar antes de avanzar.
 6. **Revisor.** Al cierre de cada fase, un subagente revisor con ojos frescos evalúa la entrega contra los criterios de la spec (ver §3 y `docs/harness/reviewer-checklist.md`) y reporta desviaciones. El orquestador corrige o registra el desvío aceptado.
 7. **Decide.** Registrar en `DECISIONS.md` las decisiones de la fase con IDs (`D-xx`), opción elegida, motivo y riesgo.
+8. **Documenta (obligatorio, I8 / D-32).** Toda tarea cerrada deja actualizado el artefacto de `docs/human/**` que afecte (doc funcional, técnica, contrato `openapi.yaml`, diagramas Mermaid, `README.md`, `CHANGELOG.md`, `runbook.md`) con su línea `Actualizado: fase NN · fecha`, y la columna *Docs* de `tasks.md` cita lo tocado o `sin impacto`. Al cerrar la fase se comprueba la frescura con `scripts/check.ps1`: un artefacto con marcador anterior a la última fase cerrada es un fallo de compuerta. **La fase no pasa a `verified` con la documentación pendiente.**
 
 Reglas de estado:
 
@@ -33,6 +34,7 @@ Reglas de estado:
 - Las **specs** se reescriben libremente antes de `implement`; después, solo por vía de enmienda.
 - El brief de producto (`PROMPT.md`) solo cambia pidiendo autorización al usuario.
 - Las **definiciones de agente** (`.opencode/agents/*.md`) y este `AGENTS.md` son change control de harness: el orquestador tiene `ask` al editarlos.
+- **Dependencias y cadena de suministro** (I4b / D-30): el gestor de paquetes, su versión en `packageManager`, `pnpm-lock.yaml`, `allowBuilds`, `pnpmfile`, `patchedDependencies` o cualquier spec exótica **no se cambian desde el código**: son decisión registrada + edición de `package.json`/`pnpm-workspace.yaml` ordenada por el orquestador. El implementador tiene `pnpm add|update|install` denegados.
 - **Acciones externas** (crear/modificar recursos AWS reales, `deploy`, `remove`, `setWebhook`, rotar claves): nunca automáticas. Se proponen con comandos exactos y se ejecutan con visto del usuario (I6).
 
 ## 3. Swarm (orquestación de subagentes)
@@ -42,11 +44,11 @@ Desde **todas** las fases (decisión D-02). Los roles están definidos como arch
 | Rol | Definición | Contexto | Qué hace / no hace |
 |---|---|---|---|
 | **Orquestador** | `.opencode/agents/orchestrator.md` (`mode: primary`, default del repo) | Brief, constitución, historia de decisiones, conversación | Specs, decisiones, propuestas y validación con el usuario, integración, compuertas, ejecución de acciones externas con el visto. No delega decisiones de diseño ni de contrato. Sus `permissions` piden aprobación del usuario para editar constitución, `AGENTS.md`, `PROMPT.md` y los agentes, y solo le dejan lanzar los 5 subagentes del harness. |
-| **Implementador** | `.opencode/agents/implementer.md` | Prompt cerrado: spec + tasks + **solución validada por el usuario** + lista exacta de archivos | Ejecuta la solución validada en `src/**` y `tests/**`. No marca tasks, no toca IaC ni CI/CD, no edita docs, no añade dependencias fuera de lo validado. Devuelve informe. |
-| **Explorador** | `.opencode/agents/explorer.md` | Pregunta puntual | Lee, busca e investiga (docs de Telegram Bot API, cuota de Free Tier, comportamiento de HTTP API, sintaxis de IaC); nunca escribe ni ejecuta shell. |
-| **Revisor fresh-eyes** | `.opencode/agents/reviewer.md` | Spec + criterios de aceptación, sin saber quién escribió el código | Compara entrega contra criterios; reporta desviaciones por severidad. Solo lectura + compuertas (`check`/`lint`/`test`/`validate:iac`). |
-| **Documentador** | `.opencode/agents/documenter.md` | Orden mecánica del orquestador | Sincroniza `INDEX.md`, `tasks.md`, `DECISIONS.md`, `README.md` y enmiendas de specs. Nunca toca código, IaC ni constitución. |
-| **DevOps** | `.opencode/agents/devops.md` (definido por adelantado, D-12; se activa en Fase 03) | Spec de la fase de infra + constitución (I2: coste $0, D-11) | IaC (`serverless.yml`/`template.yaml`/`infra/**`) y workflows de Actions (`.github/**`). Shell solo de inspección y validación; los despliegues los propone y los ejecuta el orquestador con el visto. Nunca crea ni destruye recursos pagados ni elimina tablas/stacks/functions (deny mecánico). |
+| **Implementador** | `.opencode/agents/implementer.md` | Prompt cerrado: spec + tasks + **solución validada por el usuario** + lista exacta de archivos | Ejecuta la solución validada en `src/**` y `tests/**`. No marca tasks, no toca IaC ni CI/CD, no edita docs: **en su informe declara el impacto documental** (qué artefactos de `docs/human/**` hay que tocar) y el orquestador lo ordena al documentador (I8). No añade dependencias fuera de lo validado. |
+| **Explorador** | `.opencode/agents/explorer.md` | Pregunta puntual | Lee, busca e investiga (docs de Telegram Bot API, Function URL, cuota de Free Tier, ajustes de seguridad de pnpm, sintaxis de SAM/CFN); nunca escribe ni ejecuta shell. |
+| **Revisor fresh-eyes** | `.opencode/agents/reviewer.md` | Spec + criterios de aceptación, sin saber quién escribió el código | Compara entrega contra criterios; reporta desviaciones por severidad. Solo lectura + compuertas (`check`/`lint`/`test`/`validate:api`/`validate:iac`). **Verifica también la documentación: contrato `openapi.yaml` coherente con el código, diagramas al día, frescura `Actualizado:` y ejemplos ejecutables (I8).** |
+| **Documentador** | `.opencode/agents/documenter.md` | Orden mecánica del orquestador | Sincroniza `INDEX.md`, `tasks.md`, `DECISIONS.md` y **toda la documentación para humanos: `README.md`, `CHANGELOG.md` y `docs/human/**` (funcional, técnica, `api/openapi.yaml`, diagramas Mermaid, `runbook.md`) con su marcador `Actualizado:` (I8)**. Nunca toca código, IaC ni constitución. |
+| **DevOps** | `.opencode/agents/devops.md` (definido por adelantado, D-12; se activa en Fase 03) | Spec de la fase de infra + constitución (I2: coste $0, D-11/D-26/D-27; I4b: cadena de suministro, D-30) | IaC SAM (`template.yaml`, `infra/**`) y workflows de Actions (`.github/**`). Shell solo de inspección y validación estática (`cfn-lint`, `validate-template`, `describe-*`); **`sam build`/`sam deploy` no son compuertas** y los despliegues los propone y los ejecuta el orquestador con el visto (D-31). Nunca crea ni destruye recursos pagados ni elimina tablas/stacks/functions (deny mecánico). |
 
 Reglas del protocolo:
 
@@ -57,10 +59,11 @@ Reglas del protocolo:
 5. **Límite de bucle (máximo 2 repeticiones, D-08)**: una tarea no puede rebotar entre subagentes más de 2 veces. Primera entrega → revisión → corrección 1 → revisión → corrección 2. Si tras la segunda corrección no pasa, la tarea pasa a `bloqueada` y vuelve al orquestador: la resuelve él directamente o escala al usuario. El bloqueo queda anotado en la spec (sección *Risks / deviations*).
 6. **Validación user-first (D-07)**: las propuestas de solución que nazcan en subagentes no llegan al implementador sin pasar por el usuario (§1.3). El orquestador presenta y recolecta el visto.
 7. Las plantillas de prompt y las listas de verificación viven en `docs/harness/` (no en las specs).
+8. **Documentación como parte de la entrega (I8 / D-32)**: el contrato machine-readable (`docs/api/openapi.yaml`) es propiedad del orquestador (es contrato, no prosa); la redacción de `docs/human/**`, `README.md`, `CHANGELOG.md` y diagramas la ejecuta el documentador por orden, con el contenido que el orquestador dicta desde la spec y el informe del implementador. **Ninguna tarea pasa a `done` con su fila *Docs* vacía.**
 
 ### 3a. Ciclo de vida y asignación de tareas (D-09)
 
-Cada tarea de `tasks.md` tiene ID (`T-xx`), estado, responsable y evidencia. Estados:
+Cada tarea de `tasks.md` tiene ID (`T-xx`), estado, responsable, evidencia y **fila *Docs*** (artefactos de `docs/human/**` tocados o `sin impacto`). Estados:
 
 ```
 pendiente → propuesta → validada(en-flight) → impl-done → revisada → done
@@ -69,38 +72,41 @@ pendiente → propuesta → validada(en-flight) → impl-done → revisada → d
 
 Matriz de asignación (la tarea rota de rol **cuando cambia de estado**; no hay round-robin):
 
-| Estado | Propon la solución | Ejecuta | Revisa | Sincroniza doc |
+| Estado | Propon la solución | Ejecuta | Revisa | Documentación (I8) |
 |---|---|---|---|---|
-| pendiente | Orquestador (o el subagente que él designe) | — | — | Documentador |
+| pendiente | Orquestador (o el subagente que él designe) | — | — | Documentador anota el artefacto previsible en la fila *Docs* |
 | propuesta | Orquestador te la muestra (D-07) | — | — | Documentador |
-| validada (en-flight) | — | Implementador (código) / DevOps (IaC, CI) | — | Documentador |
-| impl-done | — | Orquestador corre compuertas (`check`/`lint`/`test`/`validate:iac`) | Revisor fresh-eyes | Documentador |
-| revisada-OK | — | — | — | Documentador marca `done` |
+| validada (en-flight) | — | Implementador (código) / DevOps (IaC, CI) | — | Implementador **declara el impacto documental en su informe**; no edita docs |
+| impl-done | — | Orquestador corre compuertas (`check`/`lint`/`test`/`validate:api`/`validate:iac`) | Revisor fresh-eyes | **Documentador actualiza los artefactos afectados, su línea `Actualizado:` y `CHANGELOG.md`, por orden del orquestador** |
+| revisada-OK | — | — | Revisor confirma frescura y coherencia contrato↔código | Documentador marca `done` **solo con la fila *Docs* rellena** |
 | revisada-FAIL | Orquestador reencuadra la solución → nueva validación → corrección 1 → 2 (máx., D-08) | Implementador (corrección) | Revisor | Documentador |
-| bloqueada | **Escala al usuario** con lo intentado | — | — | Documentador |
+| bloqueada | **Escala al usuario** con lo intentado | — | — | Documentador (nota en la spec, sección *Risks / deviations*) |
 
 Reglas de asignación:
 
-- Contratos de datos, política de seguridad, enmiendas y decisiones: nunca salen del orquestador.
+- Contratos de datos, política de seguridad, enmiendas y decisiones: nunca salen del orquestador. El `docs/api/openapi.yaml` es contrato → lo fija el orquestador; el documentador lo maqueta/comenta, nunca lo cambia de fondo.
+- **Una tarea no pasa a `done` con la fila *Docs* vacía**, ni una fase a `verified` con frescura rota (`check.ps1` lo comprueba contra la última fase cerrada de `INDEX.md`).
 - Todo lo que cree o modifique recursos reales (deploy, `setWebhook`, rotación de claves) lo ejecuta el orquestador con visto del usuario, aunque la definición técnica sea del DevOps.
-- El explorador solo interviene en `pendiente`/`propuesta` (investigación de APIs, cuotas, límites de HTTP API) cuando el orquestador se lo ordena.
+- El explorador solo interviene en `pendiente`/`propuesta` (investigación de APIs, cuotas y límites de Function URL/DynamoDB, seguridad de dependencias) cuando el orquestador se lo ordena.
 - La rotación termina en `done`: una tarea no vuelve a estados anteriores salvo vía revisión-FAIL (y siempre con el límite de bucle de D-08).
 - El responsable de sincronizar el estado en `tasks.md`/`INDEX.md` es siempre el documentador (por orden); el orquestador nunca ejecuta en-flight a sí mismo en fases 2+.
 
 ## 4. Compuertas de fase
 
+**Transversal a todas las fases (I8):** al cerrar la fase, `docs/human/**` refleja lo entregado (contrato `openapi.yaml`, doc funcional, doc técnica, diagramas, `README.md`, `CHANGELOG.md`) con su línea `Actualizado: fase NN · fecha`, y `scripts/check.ps1` valida la frescura. Una fase con documentación sin actualizar **no** pasa a `verified`.
+
 | Fase | Contenido | Compuerta |
 |---|---|---|
-| 00 | Arquitectura, elección de IaC, capas, env vars | `check.ps1` en verde; decisión de IaC registrada; estructura de carpetas y contrato de variables documentados; **aprobación del usuario** (condiciona todo lo demás) |
-| 01 | Modelo de datos + 4 contratos de API | `check.ps1`; esquema estricto de `TicketsTable`, enum de estado, errores y códigos HTTP documentados; idempotencia del webhook decidida |
-| 02 | Scaffold (ESM, lint, scripts, `.env.example`) | `npm run lint` + `npm test` + `check.ps1`; `npm run check` expone el gate documental |
-| 03 | IaC: tabla, HTTP API, Lambdas, IAM, env | Compuertas 02 + validación de IaC **sin desplegar**; revisión IAM de menor privilegio; evidencia de alerta de facturación $0 (I2) |
-| 04 | Ingesta `POST /webhook/telegram` | Compuertas base + tests: `2xx` garantizado en ignores, campos extraídos, ticket en `PENDING`, cero duplicados por `update_id` |
-| 05 | Lectura `GET /api/tickets` + auth | Compuertas base + tests de orden desc, filtro `?status=` y `401`/`403` sin `x-api-key` válida |
-| 06 | Mutación `PATCH /api/tickets/{id}` | Compuertas base + tests de enum (`400`), `404` si no existe, `updated_at` refrescado |
-| 07 | Respuesta `POST /api/tickets/{id}/reply` | Compuertas base + tests con Telegram simulado: `RESOLVED` solo con OK real, estado intacto si Telegram falla |
-| 08 | CI/CD + despliegue + `setWebhook` | Compuertas base + workflow válido en seco; **visto explícito del usuario** antes de cualquier comando que toque el mundo real; prueba E2E documentada |
-| 09 | Hardening, coste y entrega | `README.md` con el `curl` exacto; informe final; revisión de cuotas y límites conocidos anotados |
+| 00 | Arquitectura, elección de IaC, capas, env vars | `check.ps1` en verde; decisión de IaC registrada; estructura de carpetas y contrato de variables documentados; **`docs/human/README.md` (índice + tabla de frescura) y `technical/architecture.md` creados**; **aprobación del usuario** (condiciona todo lo demás) |
+| 01 | Modelo de datos + 4 contratos de API | `check.ps1`; esquema estricto de `TicketsTable`, enum de estado, errores y códigos HTTP documentados; idempotencia del webhook decidida; **`docs/api/openapi.yaml` + `functional/api.md` existentes y sin ejemplos con secretos** |
+| 02 | Scaffold (ESM, ESLint, scripts, `.env.example`, `pnpm-workspace.yaml`) | `pnpm install --frozen-lockfile` + `pnpm run lint` + `pnpm test` + `check.ps1`; **`README.md` con comandos ejecutables y variables; `CHANGELOG.md`; `technical/operations.md` (dev local); script `validate:api` + test de contrato en verde** |
+| 03 | IaC: tabla provisioned, Function URL, Lambda, IAM, env | Compuertas 02 + `pnpm run validate:iac` (cfn-lint) en verde; **asserts de IaC** de `check.ps1` en verde; revisión IAM de menor privilegio; spike D-31 resuelta (artefacto con árbol plano); **`diagrams/deployment.mmd` + `.svg` y `runbook.md` (sección despliegue en seco)**; evidencia de alerta de facturación $0 y cuenta en Paid plan (I2) |
+| 04 | Ingesta `POST /webhook/telegram` | Compuertas base + tests: `2xx` garantizado en ignores, campos extraídos, ticket en `PENDING`, cero duplicados por `update_id`; **`functional/api.md` + `openapi.yaml` + `diagrams/api-flow.mmd` del endpoint** |
+| 05 | Lectura `GET /api/tickets` + auth | Compuertas base + tests de orden desc, filtro `?status=` y `401`/`403` sin `x-api-key` válida; **doc y contrato del endpoint al día** |
+| 06 | Mutación `PATCH /api/tickets/{id}` | Compuertas base + tests de enum (`400`), `404` si no existe, `updated_at` refrescado; **doc y contrato al día** |
+| 07 | Respuesta `POST /api/tickets/{id}/reply` | Compuertas base + tests con Telegram simulado: `RESOLVED` solo con OK real, estado intacto si Telegram falla; **doc y contrato al día** |
+| 08 | CI/CD + despliegue + `setWebhook` | Compuertas base + workflow válido en seco; **visto explícito del usuario** antes de cualquier comando que toque el mundo real; prueba E2E documentada; **`runbook.md` completo (deploy, `setWebhook` con `curl` exacto, rotación, rollback) y `README.md` con la URL final** |
+| 09 | Hardening, coste y entrega | **`functional/product.md` y `technical/decisions-summary.md`**; pase final de frescura de `docs/human/**`; informe final; revisión de cuotas y límites conocidos anotados |
 
 ## 5. Reglas de comunicación
 
@@ -112,5 +118,8 @@ Reglas de asignación:
 ## 6. Verificación mecánica
 
 - `scripts/check.ps1`: valida constitución y `DECISIONS.md` presentes, cláusula de coste $0 e cláusula de seguridad presentes, spec de la fase en curso con criterios de aceptación y alcance, estado coherente en `INDEX.md` y **higiene de secretos** (ningún token/clave real en archivos del repo). Sin dependencias externas.
-- Desde Fase 02 el proyecto integra el mismo script como `npm run check`, además de `lint`/`test`.
-- Desde Fase 03 se añade `npm run validate:iac` (envuelve el validador estático elegido en Fase 00). **Nunca** invoca un despliegue.
+- Desde Fase 02 el proyecto integra el mismo script como `pnpm run check`, además de `lint`/`test`. **Todo comando de dependencias es pnpm** (`pnpm install --frozen-lockfile`, `pnpm add -D <paquete>`); `npm`, `npx` e `yarn` están prohibidos por I4b/D-30.
+- Desde Fase 03 se añade `pnpm run validate:iac` = **`cfn-lint template.yaml`**. `sam build` queda fuera de las compuertas porque ejecuta scripts de dependencias (D-31); el empaquetado del artefacto se hace con pasos deterministas de pnpm y se valida en la spike D-31 de Fase 03. **Ningún comando de despliegue forma parte de una compuerta.**
+- `check.ps1` también valida los **asserts de cadena de suministro** (I7): `pnpm-lock.yaml` presente, `package-lock.json`/`yarn.lock` ausentes, `packageManager: pnpm@x.y.z` exacto, `pnpm-workspace.yaml` con `ignoreScripts`/`strictDepBuilds`/`minimumReleaseAge`/`trustPolicy`, y cero specs exóticas en `dependencies`.
+- `check.ps1` valida además la **documentación para humanos** (I8): existe el índice `docs/human/README.md` con su tabla de frescura; existen los artefactos exigidos por la fase en curso (contrato `docs/api/openapi.yaml` desde Fase 01, `README.md`/`CHANGELOG.md` desde Fase 02, diagramas `.mmd` + `.svg` desde Fase 03, `runbook.md` desde Fase 03); cada artefacto requerido lleva `Actualizado: fase NN · fecha` con `NN` ≥ la última fase cerrada en `INDEX.md`; y el `README.md` menciona los comandos reales del proyecto (`pnpm install --frozen-lockfile`, `pnpm run lint`, `pnpm test`, `pnpm run dev`).
+- Desde Fase 02, `pnpm run validate:api` (lint de `docs/api/openapi.yaml` con la herramienta dev fijada en D-32) y el **test de contrato** `código ↔ openapi` forman parte de la compuerta: si difieren, la fase no cierra. Para exportar diagramas/HTML se usan devDependencies locales (`@mermaid-js/mermaid-cli`, `@redocly/cli`), **nunca** CDN ni servicios hosted (I8d).

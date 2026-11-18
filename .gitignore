@@ -1,5 +1,13 @@
-# Dependencies
+# Dependencies (pnpm es el unico gestor permitido: constitucion I4b / D-30)
 node_modules/
+.pnpm-store/
+_modules/
+
+# Lockfiles de otros gestores: prohibidos en este repo (I4b). Se listan por si acaso.
+package-lock.json
+yarn.lock
+bun.lockb
+npm-shrinkwrap.json
 
 # Local secrets & env (nunca commit: constitucion I4)
 .env

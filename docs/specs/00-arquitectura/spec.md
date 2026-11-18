@@ -17,7 +17,8 @@ Fijar las cuatro decisiones que determinan todos los artefactos siguientes y dej
 
 - Documento de arquitectura en esta spec (secciones 4–7) + decisiones registradas en `DECISIONS.md`.
 - Definición del árbol de carpetas objetivo (sin crear el código de producto).
-- Definición del conjunto de scripts npm que exigirá la Fase 02 (`lint`, `test`, `check`, `validate:iac`).
+- Definición del conjunto de scripts del proyecto (**pnpm**, D-30) que exigirá la Fase 02 (`lint`, `test`, `check`, `dev`, `validate:api`, `validate:iac`, `docs:api-html`, `docs:diagrams`).
+- Definición del **mapa de documentación para humanos** y de su obligación de mantenimiento (I8 / D-32): `docs/human/**`, `docs/api/openapi.yaml`, `README.md`, `CHANGELOG.md`, diagramas Mermaid y `runbook.md`, con su regla de frescura computable.
 - Definición del comando/criterio de "validación de IaC sin desplegar" que usará la Fase 03.
 
 ## 3. Fuera de alcance
@@ -40,13 +41,13 @@ Fijar las cuatro decisiones que determinan todos los artefactos siguientes y dej
 | Artefactos | Bucket S3 del framework (<$0.01/mes) | Bucket gestionado `aws-sam-cli-managed-default` (<$0.01/mes) | También bucket S3: el `Code.ZipFile` inline obliga a **un único archivo `index.js` en CommonJS** → choca con ESM multicharchivo |
 | Fuga / lock-in | DSL del vendor + credencial de tercero en la pipeline | Es CloudFormation: salida directa al mismo archivo | Cero |
 
-**Elección registrada (visto del usuario, 2026-11-18 → D-15): Opción B — AWS SAM** (`template.yaml` con `Transform: AWS::Serverless-2016-10-31`, un solo stage implícito, artefactos en el bucket gestionado por SAM). El comando de compuerta es `sam build` + `cfn-lint`: offline, sin credenciales AWS, sin Docker para Node.js. Serverless Framework v4 queda descartada por la credencial de tercero obligatoria en CLI/CI; CloudFormation nativo queda como vía de escape abierta (el mismo archivo es CFN) y no como punto de partida.
+**Elección registrada (visto del usuario, 2026-11-18 → D-15): Opción B — AWS SAM** (`template.yaml` con `Transform: AWS::Serverless-2016-10-31`, un solo stage implícito, artefactos en el bucket gestionado por SAM). Compuerta: **`cfn-lint template.yaml`** (offline, sin credenciales, sin ejecutar scripts). `sam build` queda como paso de empaquetado/deploy, **no como gate** (D-31: AWS documenta que ejecuta *package manager scripts*). Serverless Framework v4 queda descartada por la credencial de tercero obligatoria en CLI/CI; CloudFormation nativo queda como vía de escape abierta (el mismo archivo es CFN) y no como punto de partida.
 
 Motivo, en orden de peso:
-1. **C5 es vinculante y A no lo cumple honestamente**: el propio documento de upgrade a v4 declara la autenticación como *breaking change* que afecta a máquina local **y a pipelines**. Nuestra compuerta exige validar sin credenciales y sin tocar el mundo real; con A hay que meter una credencial de un tercero (`SERVERLESS_ACCESS_KEY`) y depender de la red de Serverless Inc. Con B, `sam build` + `cfn-lint` corren 100 % offline y sin credenciales AWS.
+1. **C5 es vinculante y A no lo cumple honestamente**: el propio documento de upgrade a v4 declara la autenticación como *breaking change* que afecta a máquina local **y a pipelines**. Nuestra compuerta exige validar sin credenciales y sin tocar el mundo real; con A hay que meter una credencial de un tercero (`SERVERLESS_ACCESS_KEY`) y depender de la red de Serverless Inc. Con B, `cfn-lint` corre offline y sin credenciales (y `sam build`, que también valida, deliberately queda fuera del gate por D-31: ejecuta scripts de dependencias).
 2. **Licencia**: B es Apache-2.0; A empaqueta código propietario en el módulo npm y condiciona su gratuidad a un umbral de facturación por honor system.
 3. **Sin puerta falsa a v3**: v3 sigue open source pero **sin parches de seguridad desde 2025**; no es una vía de escape.
-4. **El brief y la constitución salen mejor servidos**: B genera exactamente los recursos del §5 de `PROMPT.md` (HTTP API v2, Lambdas, IAM) y deja la plantilla legible para auditar menor privilegio (I4), con `StageName: $default` para una URL limpia que Telegram acepte, y secretos como `Parameters` con `NoEcho` inyectados por `--parameter-overrides` desde secretos de GitHub (I4, sin valor literal en la plantilla).
+4. **La constitución y el brief salen mejor servidos**: B genera los recursos que pide el brief (Lambdas, IAM, variables) **sin DSL de vendor**, con HTTP API → hoy `AWS::Lambda::Url` tras D-27, plantilla legible para auditar menor privilegio (I4) y secretos como `Parameters` con `NoEcho`.
 5. **Coste**: ninguna opción es $0 en su propio software, y las tres acaban usando un bucket S3 de artefactos (<1 céntimo/mes). En coste residual, B ≈ A ≈ C.
 
 Riesgos aceptados de B: (i) el CLI SAM se instala en Python/Docker-imagen propia → en GitHub Actions se usa `aws-actions/setup-sam@v3` o el preinstalado del runner; (ii) `sam validate` **a secas** sí pide credenciales AWS: el gate se define con `sam build` + `cfn-lint`, no con `validate`; (iii) más líneas de YAML que A (mitigado por `Fn::ForEach` y por ser CFN legible).
@@ -61,7 +62,7 @@ Con **1 sola Lambda + Express dentro** ya no existen "1 handler por endpoint": e
 ```
 src/
   lambda.js         # UNICO handler: serverlessExpress({ app }) — nada de lógica aquí
-  local.js          # app.listen(PORT) para `npm run dev`: mismo arbol, sin adaptador
+  local.js          # app.listen(PORT) para `pnpm run dev`: mismo árbol, sin adaptador
   app.js            # createApp(deps): middlewares globales + montado de routers + error handler
   routes/
     telegram.js     # POST /webhook/telegram   (publico, ack 2xx garantizada)
@@ -100,7 +101,7 @@ Reglas de dependencia (una dirección): `lambda|local → app → routes → mid
 | `TELEGRAM_WEBHOOK_SECRET` | Lambda env + `setWebhook` | Valor de `X-Telegram-Bot-Api-Secret-Token` (I4) |
 | `LOG_LEVEL` | Lambda env | `info` por defecto; `debug` solo en dev |
 | `STAGE` | Serverless/SAM variables | `dev` en la v1 |
-| `PORT` | **solo local** (`npm run dev`) | Puerto de `src/local.js`; no existe en Lambda (Function URL) |
+| `PORT` | **solo local** (`pnpm run dev`) | Puerto de `src/local.js`; no existe en Lambda (Function URL) |
 
 `.env.example` (Fase 02) lista exactamente estas siete, con placeholders y sin valores reales. En IaC, `TELEGRAM_BOT_TOKEN`, `ADMIN_API_KEY` y `TELEGRAM_WEBHOOK_SECRET` entran como `Parameters` con `NoEcho: true` y se inyectan en CI con `--parameter-overrides` desde secretos de GitHub: la plantilla nunca contiene el valor.
 
@@ -114,18 +115,25 @@ Reglas de dependencia (una dirección): `lambda|local → app → routes → mid
 
 | Script | Qué hace | Nace en |
 |---|---|---|
-| `npm run lint` | ESLint flat config, `src/` + `tests/` | 02 |
-| `npm test` | Runner de tests (elegido en D-23) | 02 |
-| `npm run check` | `powershell -File scripts/check.ps1` | 02 |
-| `npm run validate:iac` | `sam build` + `cfn-lint template.yaml`: offline, **sin credenciales AWS, sin Docker para Node.js y sin desplegar**. Quedan descartados como gate `sam validate` a secas y `aws cloudformation validate-template` (piden credenciales) | 03 |
-| `npm run dev` | `node src/local.js`: levanta la **misma app Express** en `PORT` sin adaptador Lambda (I7) | 02 |
-| `npm run deploy` | **No existe.** El despliegue no es un script de proyecto: lo propone el orquestador y lo ejecuta con visto del usuario (I6) | — |
+| `pnpm run lint` | ESLint flat config, `src/` + `tests/` | 02 |
+| `pnpm test` | Runner de tests (elegido en D-23) | 02 |
+| `pnpm run check` | `powershell -File scripts/check.ps1` | 02 |
+| `pnpm run validate:iac` | **`cfn-lint template.yaml`**: offline, **sin credenciales AWS y sin ejecutar scripts de dependencias**. `sam build` queda **excluido del gate** porque AWS advierte de que corre *package manager scripts* y build tools del proyecto (D-31); `sam validate` a secas y `aws cloudformation validate-template` quedan fuera porque piden credenciales | 03 |
+| `pnpm run dev` | `node src/local.js`: levanta la **misma app Express** en `PORT` sin adaptador Lambda (I7) | 02 |
+| `pnpm run validate:api` | lint de `docs/api/openapi.yaml` (OpenAPI 3.1) con la devDependency fijada en D-32; acompaña al **test de contrato** código↔openapi (I8b.4) | 02 |
+| `pnpm run docs:api-html` / `pnpm run docs:diagrams` | generan `docs/api/api.html` y `docs/human/diagrams/*.svg` a partir de `openapi.yaml` y de los `.mmd`, **en local, sin CDN** (I8d) | 02 / 03 |
+| `pnpm run deploy` | **No existe.** El despliegue no es un script de proyecto: lo propone el orquestador y lo ejecuta con visto del usuario (I6) | — |
+
+**Gestor de paquetes: pnpm (D-30; `npm` y `yarn` prohibidos en este repo).** La versión se fija en `packageManager` de `package.json` (`pnpm@x.y.z`) y en `pnpm-lock.yaml`, y todo (`CI` y compuertas) instala con `pnpm install --frozen-lockfile`. Los controles de cadena de suministro viven en **`pnpm-workspace.yaml`** (en `.npmrc` solo quedan auth/registry/TLS): `ignoreScripts: true`, `strictDepBuilds: true`, `allowBuilds: []`, `minimumReleaseAge: 1440`, `trustPolicy: no-downgrade`, `blockExoticSubdeps: true`, `verifyStoreIntegrity: true`, `verifyDepsBeforeRun: true`, `enablePrePostScripts: false`. Añadir un paquete a `allowBuilds`, introducir `pnpmfile`/`patchedDependencies` o una spec exótica (`git:`, `github:`, `file:`, `tarball`, `link:`) exige decisión registrada en `DECISIONS.md`. **Consecuencia de empaquetado:** el `node_modules` de pnpm es una red de symlinks y **AWS Lambda no soporta symlinks en el ZIP** → el artefacto se construye con `nodeLinker: hoisted` (o `pnpm --filter . --prod deploy <dir>`), y `sam build` queda fuera de las compuertas. Su validación práctica es la spike **D-31** de Fase 03.
 
 ## 8b. Evidencia consultada (Fase 00, 2026-11-18)
 
 - Serverless Framework, *Upgrading to v4* (doc oficial, leída íntegra): "Version 4 of the Serverless Framework CLI now requires authentication. This is a breaking change as the authentication prompt in the CLI will disrupt usage of CLI commands on local machines **and in CI/CD pipelines**." Sección *License Changes*: licencia "On-Premise Software License", umbral 2 M$/año; v3 "no longer maintained" desde principios de 2025.
 - Serverless Framework, *Deploying / commands*: `serverless package` y `deploy` requieren credenciales AWS válidas; `--no-deploy` de v3 no existe en v4.
 - AWS SAM CLI releases (nov-2026: v1.172.1) y `aws-actions/setup-sam`; doc de SAM: `sam build` para Node.js no requiere Docker (salvo `--use-container`); nota de `sam validate`: "requires AWS credentials to be configured".
+- **Advertencia oficial sobre `sam build`** (referenciada en la doc de SAM): *"Don't run `sam build` on untrusted code. The command runs build tools and scripts that the project defines, such as Makefile targets, package manager scripts, and dependency…"* → por eso `sam build` **no** es compuerta en este proyecto (D-31) y el gate es `cfn-lint`.
+- **pnpm** (doc oficial *Node-Modules & Hoisting Settings*): *"Your project is deployed to a serverless hosting provider. Some serverless providers (for instance, AWS Lambda) don't support symlinks. An alternative…"* → `nodeLinker: hoisted` es la vía documentada para Lambda; `pnpm --filter=<pkg> --prod deploy <dir>` produce un árbol autocontenido. pnpm ≥ 10 **bloquea los lifecycle scripts de dependencias por defecto** (`ignoreScripts`, `strictDepBuilds`, `allowBuilds`, `pnpm approve-builds`) y expone `minimumReleaseAge`, `trustPolicy: no-downgrade`, `blockExoticSubdeps`, `verifyStoreIntegrity`, `verifyDepsBeforeRun`; desde pnpm 10 la configuración vive en `pnpm-workspace.yaml` (`.npmrc` solo auth/registry/TLS). Versiones recientes citadas en fuentes de nov-2026: serie 11.28.x y 12.21.x (la exacta se fija en `packageManager`, D-28/D-30).
+- **Contexto de la decisión D-30 (npm/`axios` en 2025-2026)**: flaw de validación del *trusted publishing* de npm con 1.500+ paquetes afectados (parcheado el 2-oct-2026, expiración de 48 h para configuraciones sin validar); `axios@1.14.1` y `axios@0.30.4` comprometidos el 31-mar-2026 (advisory CISA); npm 12.2.2 empaquetando `glob`/`minimatch` afectados por advisory de octubre de 2026. El usuario eligió pnpm por esto.
 - `cfn-lint` (nov-2026: v1.60.1): validación offline contra esquema de recursos, con soporte del transform `AWS::Serverless-*`.
 - CloudFormation: plantillas `AWS::` sin cargo; `TemplateBody` ≤ 51.200 bytes; `Code.ZipFile` genera `index.js` único en CommonJS → incompatible con ESM multicharchivo sin flag experimental.
 - API Gateway HTTP API: no tiene authorizer de *API key* (solo IAM, Lambda, JWT) → la decisión D-21 de Fase 01 debe elegir entre authorizer Lambda (`IdentitySource: $request.header.x-api-key`, 401 antes del handler) o middleware en código.
@@ -141,11 +149,14 @@ Reglas de dependencia (una dirección): `lambda|local → app → routes → mid
 - **C2** — El árbol de carpetas y las reglas de dependencia a una dirección quedan escritos en esta spec (§5) y cubren los **4 endpoints del brief** (aunque ahora vivan como rutas Express y no como 4 handlers Lambda: desviación documentada en §11 / D-27).
 - **C3** — La tabla de variables de entorno es cerrada: **siete nombres** (seis de runtime + `PORT` local), ninguno con valor real.
 - **C4** — La política de logs declara explícitamente qué campos están prohibidos en log (I4).
-- **C5** — El comando de validación de IaC queda fijado (`sam build` + `cfn-lint`) y es verificable **sin credenciales**, sin Docker y sin crear recursos (I2/I6/I7).
+- **C5** — La validación de IaC queda fijada en **`cfn-lint template.yaml`** (offline, sin credenciales, sin ejecutar scripts de dependencias) y se documenta por qué `sam build`, `sam validate` a secas y `aws cloudformation validate-template` **no** son compuerta (I2/I6/I7, D-31).
+- **C5b** — El gestor de paquetes queda fijado en **pnpm** con versión exacta en `packageManager`, `pnpm-lock.yaml` como único lockfile del repo y los ajustes de cadena de suministro en `pnpm-workspace.yaml`; `check.ps1` lo verifica (I4b/D-30).
 - **C6** — El usuario ha dado el visto a la elección de IaC, a la capacidad de DynamoDB y al frontend (compuerta de aprobación de la fase).
 - **C7** — `scripts/check.ps1` en verde con esta spec como fase en curso.
 - **C8** — La constitución (I2/I4/I5/I7/I1) está actualizada con las reglas de Function URL + provisioned 25/25 y los `asserts` de IaC que las hacen cumplir, y `check.ps1` **rechaza una plantilla que incumpla I2** (verificado: PAY_PER_REQUEST, >25 unidades, GSI, auto scaling, PITR, HTTP API, MemorySize 512, provisioned concurrency, >1 URL o >1 tabla → FAIL; plantilla conforme → PASS).
-- **C9** — Queda fijado el mecanismo de ack 2xx del webhook dentro de Express (middleware de guard dedicated, §5/I5), y la regla "CORS solo en IaC" está escrita (I4).
+- **C9** — Queda fijado el mecanismo de ack 2xx del webhook dentro de Express (middleware de guard propio, §5/I5), y la regla "CORS solo en IaC" está escrita (I4).
+- **C10** — La **documentación para humanos** queda definida y en marcha (I8 / D-32): existe el mapa con su tabla de frescura (`docs/human/README.md`), existe el primer artefacto técnico (`docs/human/technical/architecture.md`) con su `Actualizado:`, y `scripts/check.ps1` **rechaza** una fase cuya documentación requerida falte o esté obsoleta (verificado en verde y en rojo forrando `-Phase 03`).
+- **C11** — Las reglas de colocación (`docs/human/**` prosa · `docs/api/openapi.yaml` contrato · `docs/specs/**` proceso), el formato (OpenAPI 3.1 + Mermaid, sin CDN) y la cadencia de actualización (por tarea y por fase) están escritos en la constitución y reflejados en `AGENTS.md` §1.8, §3, §3a, §4 y §6.
 
 ## 10. Riesgos / desviaciones
 
@@ -196,7 +207,7 @@ Comparten: 1 tabla, 1 región (us-east-1), CloudWatch ≤ 30 días, bucket S3 de
 3. **Coste de arranque**: Express añade init (≈ decenas de ms de require + Middlewares) al cold start de Lambda, y **no se puede comprar provisioned concurrency porque es facturable (I2)**. Con 256 MB, payloads pequeños y una única función, el cold start observado objetivo es < 800 ms: aceptable para humanos y para Telegram (que reintenta, no espera). Mitigación gratuita y declarada en IaC: **`reservedConcurrency` como *kill switch* de emergencia** (ponerlo a 0 → 429 inmediato) y nunca subir memoria sin OK.
 4. **Desviación del brief**: `PROMPT.md` §6.1 pedía `src/handlers/` y §5.5 API Gateway HTTP API. La regla operativa pasa a vivir en la constitución (I1/I2/I4) y en D-26/D-27; el brief se anota como **histórico con nota de vigencia** (change control: editar `PROMPT.md` pide OK del usuario). Alternativa si prefieres el brief intacto: dejarlo como está y que cualquiera que lo lea sepa que manda la constitución.
 
-Ventajas reales que justifican el cambio: un solo dominio/URL, CORS y rutas en el mismo lugar que el código, **el mismo árbol Express corre en local con `npm run dev`** (nada de `sam local` ni de Docker para desarrollar), los tests usan `supertest` contra la app real, y el IAM se reduce a un único rol. El coste total del stack vuelve a **$0 típico** porque Function URL no factura el endpoint y la franquicia de Lambda cubre nuestro volumen.
+Ventajas reales que justifican el cambio: un solo dominio/URL, CORS y rutas en el mismo lugar que el código, **el mismo árbol Express corre en local con `pnpm run dev`** (nada de `sam local` ni de Docker para desarrollar), los tests usan `supertest` contra la app real, y el IAM se reduce a un único rol. El coste total del stack vuelve a **$0 típico** porque Function URL no factura el endpoint y la franquicia de Lambda cubre nuestro volumen.
 
 - Deuda asumida: el `Scan` de `GET /api/tickets` (I5) se acepta por volumen bajo; su umbral queda reexpresado en items leídos (§10a).
 
@@ -204,4 +215,10 @@ Ventajas reales que justifican el cambio: un solo dominio/URL, CORS y rutas en e
 
 ## 11. Amendments
 
-- (ninguna todavía)
+- **A-01 · 2026-11-18 (pre-`implement`, sin coste de trazabilidad)** — §5 se reescribe por completo: la topología elegida en D-27 (1 Lambda + Express) elimina los 4 handlers Lambda. Regla de dependencia actualizada a `lambda|local → app → routes → middleware|services → repositories|utils → config`.
+- **A-02 · 2026-11-18** — **Desviación del brief** (`PROMPT.md`): el §6.1 de entregables pedía `src/handlers/` y el §5.5/API fijaban API Gateway HTTP API; el §5.1/§5.6 pedían `PAY_PER_REQUEST` y "HTTP API, que es más económica". Lo operativo es ahora lo que dice la constitución (I1/I2/I4/I5/I7) + D-26/D-27: **1 función Lambda + Function URL + Express, tabla `PROVISIONED` 25/25**. `PROMPT.md` se mantiene como brief histórico con nota de vigencia.
+- **A-03 · 2026-11-18** — §6 contrato de configuración: de seis a **siete variables** (`PORT`, solo local para `pnpm run dev`), y se añade la regla de inyección por `Parameters` con `NoEcho: true` + `--parameter-overrides` desde secretos de GitHub (I4).
+- **A-04 · 2026-11-18** — §8 compuerta de IaC: el gate pasa a ser **solo `cfn-lint template.yaml`**. Quedan excluidos `sam validate` (a secas) y `aws cloudformation validate-template` porque piden credenciales, `serverless print` porque pide login del vendor, y **`sam build` porque ejecuta scripts de dependencias** (doc oficial citada en §8b). Ver D-31.
+- **A-05 · 2026-11-18** — §10b pasa de "candidatas para tu visto" a "elegidas": (i) con Function URL + Express. Se cierra la vía de escape futura como D-29 (migración a `PAY_PER_REQUEST` solo con OK del usuario).
+- **A-06 · 2026-11-18** — **pnpm sustituye a npm** en todos los comandos del proyecto (§8 tabla de scripts, `dev`, compuertas y CI) por decisión explícita del usuario motivada en los incidentes de la cadena de suministro de npm (D-30, constitución I4b). Consecuencias añadidas a esta spec: configuración endurecida en `pnpm-workspace.yaml`, prohibición de lockfiles ajenos, **`nodeLinker: hoisted`** (o `pnpm deploy`) para el artefacto Lambda porque ZIP no conserva symlinks, y `sam build` fuera de las compuertas (D-31).
+- **A-07 · 2026-11-18** — Se añade la **obligación de documentación para humanos** (I8 / D-32): mapa de destino (§2 alcance, §8 scripts, §9 C10-C11), contrato `docs/api/openapi.yaml` con test de deriva, diagramas Mermaid versionados y regla de frescura computable por tarea y por fase. No es una fase nueva: es un criterio de cierre transversal, con el primer artefacto (`technical/architecture.md`) ya escrito en esta fase.
