@@ -1,0 +1,30 @@
+# Dependencies
+node_modules/
+
+# Local secrets & env (nunca commit: constitucion I4)
+.env
+.env.*
+!.env.example
+
+# Build / packaging / IaC artifacts
+dist/
+build/
+.output/
+.serverless/
+.aws-sam/
+samconfig.toml
+*.zip
+
+# Tests & coverage
+coverage/
+.nyc_output/
+
+# Editors & OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+npm-debug.log*
