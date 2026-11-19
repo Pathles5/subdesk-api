@@ -29,8 +29,8 @@ Si hay conflicto entre una spec y la constitución, gana la constitución y la s
 - `scripts/check.ps1` falla si esta cláusula desaparece de la constitución.
 
 ## I3. Modelo de datos y contrato
-- La forma del ítem de `TicketsTable` definida en Fase 01 es **el contrato** del panel frontend y del bot: `id`, `telegram_chat_id`, `username`, `message_content`, `response_text`, `status`, `created_at`, `updated_at`, en `snake_case`, timestamps ISO 8601, `id` UUID v4.
-- `id` se genera con `crypto.randomUUID()` del runtime (v4), no con una dependencia externa (I4b).
+- La forma del ítem de `TicketsTable` definida en Fase 01 es **el contrato** del panel frontend y del bot: `id`, `telegram_chat_id`, `username`, `message_content`, `response_text`, `status`, `created_at`, `updated_at`, en `snake_case`, timestamps ISO 8601, `id` **UUID determinista derivada del `update_id` de Telegram (v5; D-19, enmienda de 2026-11-19 registrada en D-35 — el «v4» heredado del brief queda superado)**.
+- `id` se genera en `src/utils/ids.js` como UUID v5 de `"tg:<update_id>"` usando `node:crypto` (SHA-1), sin dependencia externa (I4b): mismo `update_id` → mismo `id`, lo que con el `Put` condicional `attribute_not_exists(id)` da la idempotencia exacta del webhook (D-19). `crypto.randomUUID()` queda solo para UUIDs no deterministas.
 - `status` es un enum cerrado: `PENDING` · `IN_PROGRESS` · `RESOLVED`. Valores fuera del enum → `400`, nunca escritura.
 - Los contratos de los 4 endpoints (forma de éxito, errores y códigos HTTP) se documentan en Fase 01 y se congelan con la spec. Cambiarlos = enmienda + `DECISIONS.md`.
 - Campos nuevos solo si la spec de la fase los justifica; no se infla el modelo.
@@ -54,7 +54,7 @@ Por indicación explícita del usuario, el proyecto **no usa npm ni yarn**: **pn
 - CI: `pnpm/action-setup` + `actions/setup-node` con `cache: pnpm`, siempre `--frozen-lockfile`; `pnpm audit --audit-level=high` se ejecuta como paso informativo del pipeline (su salida se lee y se anota; no sustituye la revisión humana).
 
 ## I5. Comportamiento operativo
-- `POST /webhook/telegram` **siempre responde 2xx**: también cuando el update se ignora (sin texto, vacío, irrelevante), para que Telegram no reintente. El error interno que no impida la ack se loguea, no se propaga como 5xx.
+- `POST /webhook/telegram` **siempre responde 2xx**: también cuando el update se ignora (sin texto, vacío, irrelevante), para que Telegram no reintente. El error interno que no impida la ack se loguea, no se propaga como 5xx. **Única excepción de código (D-21, enmienda D-36 con OK del usuario 2026-11-19):** `X-Telegram-Bot-Api-Secret-Token` ausente o inválido → `403` — los updates legítimos de Telegram siempre llevan el secreto registrado y nunca provocan ese reintento.
 - Con Express dentro de Lambda esa ack es una **obligación de la capa HTTP, no solo del handler**: la ruta del webhook va protegida por su propio *error handler* que convierte cualquier excepción —incluido un fallo de parseo de `express.json()` o un `throw` en un servicio— en `200` con cuerpo de descarte. Un `5xx` o una excepción sin capturar **fallan la invocación**, Telegram considera el update no entregado y **reintenta en bucle**, duplicando carga y tickets. Las rutas `/api/*` sí propagan `4xx`/`5xx` normales.
 - Idempotencia de ingestión: un mismo `update_id` recibido dos veces no duplica tickets (decisión de mecanismo en Fase 01).
 - La respuesta al usuario solo marca `RESOLVED` **si Telegram devolvió OK**. Si falla, el ticket conserva su estado y el error queda registrado.
@@ -98,9 +98,6 @@ docs/
       data-model.md                # la tabla, el enum, capacidad provisioned, consumo de RCU/WCU, por qué Scan y cuándo migrar a Query
       operations.md                # seguridad (x-api-key, secret token), logs (qué se registra y qué nunca), límites de 30 s / 6 MB, cold start
       decisions-summary.md         # resumen legible de DECISIONS.md para quien no va a leer el registro append-only
-    api/
-      openapi.yaml                 # CONTRATO machine-readable (OpenAPI 3.1). Fuente de verdad para el panel frontend
-      api.html                     # (opcional, generado local) documento navegable; nunca dependiente de CDN
     diagrams/
       api-flow.mmd                 # Mermaid: petición → Function URL → router → DynamoDB/Telegram, por endpoint
       deployment.mmd               # Mermaid: repo → GitHub Actions → SAM/CloudFormation → recursos AWS (región y stage)

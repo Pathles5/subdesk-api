@@ -1,0 +1,491 @@
+# SubDesk API — contrato machine-readable (OpenAPI 3.1). Propiedad del orquestador (I8/D-32):
+# rutas, métodos, códigos y schemas los fija la spec de fase; el documentador maqueta descripciones.
+# Ruta ÚNICA del contrato (D-34). Cambios = enmienda en docs/specs/01-modelo-contratos/spec.md + DECISIONS.md.
+# Lint: `pnpm run validate:api` = `redocly lint docs/api/openapi.yaml` (@redocly/cli, decisión D-33;
+# la instalación de la devDep con versión exacta ocurre en Fase 02 — antes de eso, este archivo se valida a mano).
+# Diagramas: los .mmd/.svg del flujo por endpoint (api-flow) se crean en Fase 04, cuando exista la
+# implementación que representan (I8: nada vacío ni por adelantado); la exportación local es `pnpm run docs:diagrams` (@mermaid-js/mermaid-cli, D-33).
+# Actualizado: fase 01 · 2026-11-19
+openapi: 3.1.0
+info:
+  title: SubDesk API
+  version: 0.1.0
+  description: |
+    Backend serverless que hace de puente entre un bot de Telegram y un panel de atencion.
+
+    - `POST /webhook/telegram` — ingesta pública (solo Telegram, autenticada con `X-Telegram-Bot-Api-Secret-Token`). Responde `200` a todo update con secreto válido para que Telegram nunca reintente.
+    - `GET /api/tickets` — cola de tickets, orden `created_at` desc, filtro opcional por `status`, paginacion por cursor opaco.
+    - `PATCH /api/tickets/{id}` — cambio de estado (`IN_PROGRESS` | `RESOLVED`; no reabre a `PENDING`).
+    - `POST /api/tickets/{id}/reply` — responde en el chat de Telegram (`sendMessage`) y, **solo si Telegram devuelve OK**, persiste `response_text` y pasa el ticket a `RESOLVED`.
+
+    Autenticacion del panel: cabecera `x-api-key` (comparacion con `ADMIN_API_KEY`, `crypto.timingSafeEqual`). `401` si falta o esta vacia; `403` si no coincide. La comprobacion ocurre antes de tocar DynamoDB.
+
+    Esta URL es un placeholder: la real es la Lambda Function URL que resulte del despliegue (Fase 08) y queda registrada en `README.md`.
+
+    Contract freeze (I3): esta definicion es vinculante para el panel frontend. Cualquier cambio es enmienda documentada en `docs/specs/01-modelo-contratos/spec.md` + decision en `DECISIONS.md`. El `id` es UUID v5 determinista (D-19; I3 enmendada en D-35) — para el panel sigue siendo un opaco.
+  contact:
+    name: SubDesk API — contracto mantenido por el orquestador
+servers:
+  - url: https://REPLACE_ME.lambda-url.us-east-1.on.aws
+    description: Lambda Function URL (placeholder; valor real tras el deploy de Fase 08, I6)
+
+tags:
+  - name: webhook
+    description: Ingestion desde Telegram (publico + secret token)
+  - name: tickets
+    description: Superficie del panel (x-api-key)
+
+security: []
+
+paths:
+  /webhook/telegram:
+    post:
+      tags: [webhook]
+      summary: Recepcion de updates de Telegram
+      operationId: postTelegramWebhook
+      description: |
+        Telegram llama aqui (webhook, nunca polling). Semantica inquebrantable (I5, brief §5.3):
+
+        - Update legitimo con ticket nuevo → `200 {"received": true}`.
+        - Update legitimo ignorado (sin texto, no-mensaje, duplicado, payload no parseable o interno) → `200 {"ignored": "<motivo>"}`. **Nunca** 4xx/5xx por contenido.
+        - Deduplicacion exacta por `update_id` (idempotencia, D-19): el reintento del mismo `update_id` cae en `duplicate`.
+        - Un cuerpo superior al limite de 64 KB o no parseable como JSON tambien se responde `200 {"ignored": "unsupported_update"}` (el error de parseo lo absorbe el guard del webhook, D-16).
+
+        Excepcion unica al 2xx garantizado: `X-Telegram-Bot-Api-Secret-Token` ausente o distinto del esperado → `403`. Justificacion (D-21): los reintentos legitimos de Telegram **siempre** llevan el secreto registrado con `setWebhook`; quien lo falla no es Telegram reintentando un update, y rechazarlo gratis no puede provocar bucle de reintento alguno.
+      parameters:
+        - $ref: "#/components/parameters/TelegramWebhookSecret"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              description: Update de Telegram (payload 2.0 de la Bot API). Se consumen `update_id` y `message.{chat.id, from.username, from.first_name, text}`; el resto pasa intacto y se ignora.
+              additionalProperties: true
+            examples:
+              text_message:
+                summary: Mensaje de texto normal → crea ticket
+                value:
+                  update_id: 482391756
+                  message:
+                    message_id: 42
+                    from:
+                      id: 112233445
+                      is_bot: false
+                      first_name: Ana
+                      username: ana_example
+                    chat:
+                      id: 112233445
+                      type: private
+                    date: 1763424000
+                    text: "Hola, mi suscripcion no se ha renovado."
+              callback_query:
+                summary: Update no-mensaje → ignorado (200, nunca reintento)
+                value:
+                  update_id: 482391757
+                  callback_query:
+                    id: "1234567890"
+                    from:
+                      id: 112233445
+                      is_bot: false
+                      first_name: Ana
+                    chat_instance: "-1234567890"
+                    data: "noop"
+      responses:
+        "200":
+          description: Ack siempre para todo update con secreto valido (creado o ignorado).
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: "#/components/schemas/WebhookReceived"
+                  - $ref: "#/components/schemas/WebhookIgnored"
+              examples:
+                received:
+                  value: { "received": true }
+                ignored_no_text:
+                  value: { "ignored": "no_text" }
+                ignored_duplicate:
+                  value: { "ignored": "duplicate" }
+        "403":
+          $ref: "#/components/responses/ForbiddenWebhook"
+
+  /api/tickets:
+    get:
+      tags: [tickets]
+      summary: Lista de tickets
+      operationId: listTickets
+      description: |
+        Orden `created_at` descendente. El filtro `status` se aplica en el servidor durante el `Scan` (no ahorra capacidad evaluada — umbral I5 y fase 10). La paginacion es un cursor **opaco** del `Scan`: no expongas su contenido ni asumas orden por PK entre paginas.
+
+        Nota de honestidad (spec §5.2): el orden desc es por pagina escaneada; con el volumen objetivo (< ~1.000-2.000 items) una sola pagina cubre la cola.
+      security:
+        - ApiKeyAuth: []
+      parameters:
+        - name: status
+          in: query
+          required: false
+          description: Filtro por enum cerrado. Valor fuera del enum → `400 VALIDATION_ERROR`.
+          schema:
+            $ref: "#/components/schemas/TicketStatus"
+        - name: limit
+          in: query
+          required: false
+          description: Items por pagina.
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 50
+        - name: cursor
+          in: query
+          required: false
+          description: Cursor opaco devuelto como `next_cursor` en la pagina anterior. Omitir = primera pagina.
+          schema:
+            type: string
+            minLength: 1
+      responses:
+        "200":
+          description: Pagina de tickets (posiblemente vacia).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TicketList"
+        "400":
+          $ref: "#/components/responses/ValidationError"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  /api/tickets/{id}:
+    patch:
+      tags: [tickets]
+      summary: Cambio de estado de un ticket
+      operationId: patchTicket
+      description: |
+        Mutacion de estado, nada mas. `RESOLVED` por esta via es un cierre administrativo sin respuesta al usuario (el cierre con respuesta es `POST /api/tickets/{id}/reply`).
+
+        - Solo `status` en el cuerpo; cualquier otro campo o forma → `400`.
+        - Reabrir a `PENDING` esta prohibido → `400`.
+        - Concurrencia v1: ultimo-que-escribe gana (sin `version`, spec §5.3).
+      security:
+        - ApiKeyAuth: []
+      parameters:
+        - $ref: "#/components/parameters/TicketId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TicketStatusPatch"
+            examples:
+              to_in_progress:
+                value: { "status": "IN_PROGRESS" }
+      responses:
+        "200":
+          description: Ticket actualizado (`updated_at` refrescado).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ticket"
+        "400":
+          $ref: "#/components/responses/ValidationError"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /api/tickets/{id}/reply:
+    post:
+      tags: [tickets]
+      summary: Responder al usuario en Telegram y cerrar el ticket
+      operationId: replyTicket
+      description: |
+        Secuencia (brief §5.7, spec §5.4): cargar ticket → si ya `RESOLVED`, `409`; enviar `sendMessage(chat_id, response_text)` a la Bot API; **solo si Telegram devuelve `ok: true`** persistir `response_text` + `status: RESOLVED` + `updated_at` y devolver el ticket.
+
+        Si Telegram falla (timeout, 4xx/5xx, `ok: false`): `502 TELEGRAM_SEND_FAILED` y **cero cambios** en el item (ni estado ni texto). El reintento de esta llamada es la politica de error de v1 — riesgo documentado de doble mensaje si el fallo fue en la lectura de la respuesta de Telegram (spec §9.2).
+      security:
+        - ApiKeyAuth: []
+      parameters:
+        - $ref: "#/components/parameters/TicketId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TicketReplyRequest"
+            examples:
+              reply:
+                value: { "response_text": "Hola Ana: he revisado tu caso y la suscripcion queda renovada 30 dias mas." }
+      responses:
+        "200":
+          description: Ticket cerrado con respuesta entregada.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ticket"
+        "400":
+          $ref: "#/components/responses/ValidationError"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/AlreadyResolved"
+        "502":
+          $ref: "#/components/responses/TelegramSendFailed"
+
+components:
+  securitySchemes:
+    ApiKeyAuth:
+      type: apiKey
+      in: header
+      name: x-api-key
+      description: Clave del panel (`ADMIN_API_KEY`). Comparacion `crypto.timingSafeEqual`. 401 = ausente/vacia; 403 = no coincide.
+
+  parameters:
+    TicketId:
+      name: id
+      in: path
+      required: true
+      description: Id opaco del ticket (UUID determinista del `update_id`, D-19).
+      schema:
+        $ref: "#/components/schemas/TicketId"
+    TelegramWebhookSecret:
+      name: X-Telegram-Bot-Api-Secret-Token
+      in: header
+      required: true
+      description: Debe coincidir exactamente con `TELEGRAM_WEBHOOK_SECRET` (registrado via `setWebhook`, Fase 08).
+      schema:
+        type: string
+        minLength: 1
+
+  responses:
+    ValidationError:
+      description: Entrada invalida (campo fuera de schema/enum, forma no permitida).
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ApiError"
+          example:
+            error:
+              code: VALIDATION_ERROR
+              message: "status is not a valid ticket status"
+    Unauthorized:
+      description: Cabecera `x-api-key` ausente o vacia.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ApiError"
+          example:
+            error:
+              code: UNAUTHORIZED
+              message: "missing x-api-key header"
+    Forbidden:
+      description: `x-api-key` no coincide con `ADMIN_API_KEY`.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ApiError"
+          example:
+            error:
+              code: FORBIDDEN
+              message: "invalid api key"
+    ForbiddenWebhook:
+      description: |
+        Excepcion del webhook (unica no-2xx): `X-Telegram-Bot-Api-Secret-Token` ausente o incorrecto. No corresponde a ningun flujo legitimo de Telegram.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ApiError"
+          example:
+            error:
+              code: FORBIDDEN
+              message: "invalid webhook secret"
+    NotFound:
+      description: No existe un ticket con ese `id`.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ApiError"
+          example:
+            error:
+              code: NOT_FOUND
+              message: "ticket not found"
+    AlreadyResolved:
+      description: El ticket ya esta `RESOLVED`; reply no reabre (v1).
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ApiError"
+          example:
+            error:
+              code: ALREADY_RESOLVED
+              message: "ticket is already resolved"
+    TelegramSendFailed:
+      description: La Bot API no devolvio OK. El ticket queda **intacto** (ni estado ni texto).
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ApiError"
+          example:
+            error:
+              code: TELEGRAM_SEND_FAILED
+              message: "telegram did not accept the message"
+
+  schemas:
+    TicketId:
+      type: string
+      description: UUID (RFC 4122, variante v5 determinista de `tg:<update_id>`; namespace fijo `TG_UPDATE_NS`, se congela en `src/utils/ids.js` en Fase 02 y cambiarlo exige enmienda — D-19).
+      pattern: "^[0-9a-f]{8}-[0-9a-f]{4}-5[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+      examples:
+        - "2f6cf473-16d5-5b61-9a3f-08e1a0d1f4e7"   # ilustrativo: NO es el v5 real de ningun update_id; los ejemplos de id/cursor se regeneran al congelar TG_UPDATE_NS en Fase 02 (D-35)
+
+    TicketStatus:
+      type: string
+      description: Enum cerrado (brief §5.4). Cualquier otro valor se rechaza con 400.
+      enum: [PENDING, IN_PROGRESS, RESOLVED]
+
+    WebhookReceived:
+      type: object
+      description: Ticket creado a partir del update.
+      additionalProperties: false
+      required: [received]
+      properties:
+        received:
+          const: true
+
+    WebhookIgnored:
+      type: object
+      description: Update aceptado y descartado sin tocar la tabla (motivos cerrados, spec §5.1).
+      additionalProperties: false
+      required: [ignored]
+      properties:
+        ignored:
+          type: string
+          enum: [no_text, empty_message, chat_not_found, unsupported_update, duplicate, internal_error]
+
+    Ticket:
+      type: object
+      description: |
+        Ticket tal como se devuelve por la API. Espejo del item de `TicketsTable` (esquema estricto; atributos opcionales = pueden faltar en el JSON).
+        Los `examples` de cada campo son **independientes entre si**: no describen un mismo ticket, y en un item real `PENDING` `updated_at` = `created_at` (ninguna mutacion deja el estado en PENDING, D-19/§4.3).
+      additionalProperties: false
+      required: [id, telegram_chat_id, message_content, status, created_at, updated_at, telegram_update_id]
+      properties:
+        id:
+          $ref: "#/components/schemas/TicketId"
+        telegram_chat_id:
+          type: string
+          description: ID de chat de Telegram como string (los ids de grupo van en negativo; sin trampas de precision).
+          pattern: "^-?[0-9]{1,20}$"
+          examples:
+            - "112233445"
+        username:
+          type: string
+          description: "`from.username`; si no tiene, fallback `from.first_name`; si tampoco, atributo ausente."
+          minLength: 1
+          maxLength: 64
+          examples:
+            - "ana_example"
+        message_content:
+          type: string
+          description: Texto integro del mensaje (es el contenido del ticket; prohibido en logs, D-18).
+          minLength: 1
+          maxLength: 4096
+          examples:
+            - "Hola, mi suscripcion no se ha renovado."
+        response_text:
+          type: string
+          description: Respuesta entregada por `reply`; **ausente hasta que existe** (se escribe solo con OK de Telegram).
+          minLength: 1
+          maxLength: 4096
+          examples:
+            - "Hola Ana: he revisado tu caso y la suscripcion queda renovada 30 dias mas."
+        status:
+          $ref: "#/components/schemas/TicketStatus"
+        created_at:
+          type: string
+          format: date-time
+          description: ISO 8601 UTC con `Z`; inmutable tras el alta.
+          examples:
+            - "2026-11-17T09:15:42.000Z"
+        updated_at:
+          type: string
+          format: date-time
+          description: ISO 8601 UTC con `Z`; se refresca en toda mutacion.
+          examples:
+            - "2026-11-17T10:02:11.000Z"
+        telegram_update_id:
+          type: integer
+          description: `update_id` original de Telegram (trazabilidad/correlacion con sus logs; la deduplicacion es el `id`, D-19).
+          minimum: 1
+
+    TicketList:
+      type: object
+      additionalProperties: false
+      required: [tickets, next_cursor]
+      properties:
+        tickets:
+          type: array
+          description: Pagina de tickets, `created_at` desc dentro de la pagina.
+          items:
+            $ref: "#/components/schemas/Ticket"
+        next_cursor:
+          type: [string, "null"]
+          description: Cursor opaco para la siguiente pagina; `null` = fin de la cola.
+          examples:
+            - "opaque-cursor-example-01"
+
+    TicketStatusPatch:
+      type: object
+      description: Cuerpo de `PATCH /api/tickets/{id}`. Unico campo admitido: `status`, y solo hacia adelante.
+      additionalProperties: false
+      required: [status]
+      properties:
+        status:
+          type: string
+          enum: [IN_PROGRESS, RESOLVED]
+
+    TicketReplyRequest:
+      type: object
+      description: Cuerpo de `POST /api/tickets/{id}/reply`.
+      additionalProperties: false
+      required: [response_text]
+      properties:
+        response_text:
+          type: string
+          minLength: 1
+          maxLength: 4096
+          description: 1-4096 chars tras `trim`; vacio o todo espacios → 400.
+
+    ApiError:
+      type: object
+      description: Envelope unico de error en toda la API (D-20).
+      additionalProperties: false
+      required: [error]
+      properties:
+        error:
+          type: object
+          additionalProperties: false
+          required: [code, message]
+          properties:
+            code:
+              type: string
+              description: Enum cerrado de codigos de error.
+              enum:
+                - VALIDATION_ERROR
+                - UNAUTHORIZED
+                - FORBIDDEN
+                - NOT_FOUND
+                - ALREADY_RESOLVED
+                - TELEGRAM_SEND_FAILED
+                - INTERNAL
+            message:
+              type: string
+              description: Texto legible para el operador del panel. Nunca contiene secretos ni `message_content`.

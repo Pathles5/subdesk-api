@@ -1,8 +1,8 @@
 # Arquitectura técnica — SubDesk API
 
-Actualizado: fase 00 · 2026-11-18
+Actualizado: fase 01 · 2026-11-19
 
-> Documento para quien va a mantener el código. Las decisiones con su historia están en `DECISIONS.md` (se enlazan por ID); los criterios por fase están en `docs/specs/`. El contrato de la API se publica en `docs/human/api/openapi.yaml` (nace en Fase 01).
+> Documento para quien va a mantener el código. Las decisiones con su historia están en `DECISIONS.md` (se enlazan por ID); los criterios por fase están en `docs/specs/`. El contrato de la API se publica en `docs/api/openapi.yaml` (nace en Fase 01).
 
 ## Qué es este sistema
 
@@ -52,7 +52,7 @@ src/
     telegramService.js  # único sitio que habla con la Bot API (fetch nativo)
   repositories/
     ticketRepository.js # único sitio que conoce DynamoDB y la tabla
-  utils/            # http.js (responses), validation.js, ids.js (crypto.randomUUID), time.js, logger.js
+  utils/            # http.js (responses), validation.js, ids.js (UUID v5 determinista con node:crypto, D-19), time.js, logger.js
   config.js         # única lectura de process.env
 tests/              # unitarios de services + supertest sobre createApp() + test de contrato OpenAPI
 template.yaml       # SAM: 1 tabla PROVISIONED + 1 Function + FunctionUrlConfig + 1 rol
@@ -61,13 +61,20 @@ docs/human/         # esta documentación (I8)
 
 Dirección única de dependencias: `lambda|local → app → routes → middleware|services → repositories|utils → config`.
 
-- Nada importa la SDK de AWS fuera de `repositories/` (y en su caso `telegramService.js` para HTTP saliente).
+- Nada importa la SDK de AWS fuera de `repositories/`; `telegramService.js` habla con la Bot API con `fetch` nativo (regla exacta: spec §5 + A-08).
 - `createApp()` recibe dependencias inyectadas → los tests levantan la app real sin Lambda, sin DynamoDB y sin Telegram.
 - **CORS: cero líneas en código.** Se declara solo en `FunctionUrlConfig.Cors` del IaC; si Express emitiera también cabeceras CORS, Lambda las duplica y el preflight se rompe (I4).
 
 ## Contrato de configuración
 
 Siete variables, todas a través de `src/config.js` (nunca `process.env` suelto en el código): `TABLE_NAME`, `TELEGRAM_BOT_TOKEN`, `ADMIN_API_KEY`, `TELEGRAM_WEBHOOK_SECRET`, `LOG_LEVEL`, `STAGE`, y `PORT` **solo local**. Los secretos llegan al stack como `Parameters` con `NoEcho: true` desde secretos de GitHub Actions; jamás un valor literal en `template.yaml` ni en el repo (I4, D-13).
+
+## Política de logs (D-18)
+
+**Un evento JSON por invocación** —nunca `console.log` de texto plano— con los campos `level`, `msg`, `ticketId`, `updateId`, `statusCode` y `durationMs`. Así el log queda buscable en CloudWatch Insights sin sumar vendors ni coste (descartada la observabilidad externa por I2).
+
+- **Prohibido loguear (I4):** `TELEGRAM_BOT_TOKEN`, `ADMIN_API_KEY`, `TELEGRAM_WEBHOOK_SECRET`, la cabecera `x-api-key` y el `text` íntegro del usuario — de este solo se registra su **longitud**. El revisor lo verifica en cada fase; si algún día hiciera falta el contenido, es enmienda explícita de I4, no excepción silenciosa.
+- **Retención CloudWatch ≤ 30 días**, declarada en el IaC (I2): CloudWatch es el único destino de logs del stack y su ingesta puede sumar.
 
 ## Compuertas del proyecto (I7, D-31)
 
@@ -92,9 +99,11 @@ Siete variables, todas a través de `src/config.js` (nunca `process.env` suelto 
 | `Scan` | cobra lo **evaluado**, no lo devuelto | el filtro `?status=` no ahorra capacidad; umbral de revisión a `Query`: ~1.000–2.000 items leídos (I5) |
 | Conciencia de coste | sin `provisioned concurrency`, sin auto scaling, sin Web Functions | el techo de gasto es fijo y conocido ($14,24/mes en el peor caso de D-26) |
 
-## Qué falta por decidir (documentar aquí cuando se cierre)
+## Decisiones pendientes (revisado al cerrar Fase 01 · 2026-11-19)
 
-- **D-19/D-20/D-21** (Fase 01): tipos exactos e índices, formato de errores y paginación, y modo de validar `X-Telegram-Bot-Api-Secret-Token` (Function URL no admite authorizer → middleware en código).
-- **D-22/D-23** (Fase 01–02): validación de entrada (guards manuales frente a librería mínima) y framework de tests.
-- **D-28** (Fase 02): versión exacta de pnpm y del adaptador Express↔Function URL.
-- **D-31** (Fase 03): spike del empaquetado con pnpm (árbol plano, sin symlinks) sin `sam build`.
+- **Fase 01:** D-19/D-20/D-21/D-22 **resueltas el 2026-11-19** (visto del usuario; registro en `DECISIONS.md`): esquema estricto de 9 atributos, `id` UUID v5 determinista + `Put` condicional (dedup exacta sin GSI), contrato de 4 endpoints con envelope único (7 códigos), seguridad de superficie (`timingSafeEqual`; secreto del webhook → 403) y guards manuales sin librerías. Detalle: `docs/human/technical/data-model.md` + `docs/api/openapi.yaml`.
+- **Fase 02:** versión exacta de pnpm y del adaptador Express↔Function URL (**D-28**); framework y estrategia de tests (**D-23**); instalación de las devDeps del lint/export cuya herramienta ya eligió **D-33** (`@redocly/cli`, `@mermaid-js/mermaid-cli`); constante `TG_UPDATE_NS` en `utils/ids.js`. Deuda del harness asignada: huecos de mecanización de `check.ps1` (ver fila 00 en `INDEX.md`).
+- **Fase 03:** rol IAM exacto de menor privilegio (**D-24**, el gate cfn-lint ya lo fijó D-31); spike de empaquetado con pnpm árbol plano (**D-31**).
+- **Fase 08:** estrategia de CI/CD, secretos y momento del `setWebhook` (**D-25**).
+- **Futura:** migración a `PAY_PER_REQUEST` (**D-29**, exige OK explícito del usuario).
+- Estado del registro: entradas **registradas** = D-01–D-22, D-26, D-27, D-30–D-36; **solo filas de pendientes** (sin entrada todavía) = D-23, D-24, D-25, D-28, D-29; decisión **vía de escape** futura con OK obligatorio = D-29. Próximo ID libre: **D-37** (la tabla de `DECISIONS.md` es la fuente).

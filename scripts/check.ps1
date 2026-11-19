@@ -394,7 +394,7 @@ foreach ($doc in $docRequired) {
             Add-Note ("I8: {0} has a phase marker without an ISO date next to it." -f $doc.rel)
         }
     }
-    if ($raw -match "(?i)\b(TODO|WIP|pendiente de redactar)\b") {
+    if ($raw -cmatch "\bTODO\b" -or $raw -match "(?i)\b(WIP|pendiente de redactar)\b") {
         Add-Note ("I8: {0} still contains a TODO/WIP placeholder." -f $doc.rel)
     }
 }
