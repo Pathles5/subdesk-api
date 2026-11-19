@@ -10,7 +10,7 @@ Idioma: prosa en español. Rutas, campos JSON, `operationId`, comandos y nombres
 
 | Artefacto | Para quién | Qué contiene | Dueño | Nace en | Estado |
 |---|---|---|---|---|---|
-| `README.md` (raíz) | quien clona el repo | qué es, requisitos, `pnpm install --frozen-lockfile`, `pnpm run dev`, variables, despliegue, `curl` del webhook, límites | documentador (por orden) | Fase 02 | pendiente (Fase 02) |
+| `README.md` (raíz) | quien clona el repo | qué es (API — sin bot, D-37), estado por fases, comandos, variables, conexión del bot, límites | documentador (por orden) | v1 creada 2026-11-19 a petición del usuario (orquestador); se **completa en Fase 02** con comandos ejecutables reales | **creado v1 (Actualizado: fase 01 · 2026-11-19)** |
 | `CHANGELOG.md` (raíz) | quien consume la API | cambios por versión: endpoints añadidos/modificados, rupturas, migraciones | documentador | Fase 02 | pendiente (Fase 02) |
 | `functional/product.md` | producto / agente del panel | flujos de uso: usuario escribe al bot → ticket → agente responde → llega al chat | documentador | Fase 09 | pendiente (Fase 09) |
 | `functional/api.md` | frontend del panel | los 4 endpoints en lenguaje humano: ejemplos reales de petición/respuesta, errores, auth, límites (30 s / 6 MB) | documentador | **Fase 01** | **creado (Actualizado: fase 01 · 2026-11-19)** |

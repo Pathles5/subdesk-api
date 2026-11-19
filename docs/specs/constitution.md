@@ -4,8 +4,8 @@ Inmutables del proyecto. Ninguna spec ni implementación puede contradecir esto.
 Si hay conflicto entre una spec y la constitución, gana la constitución y la spec se reescribe.
 
 ## I1. Alcance
-- Backend serverless de un gestor de tickets integrado con Telegram: un bot (webhook) + una API REST para un panel externo.
-- Un solo bot, una sola tabla (`TicketsTable`), un solo tipo de entidad (ticket).
+- **La entrega de este repo es SOLO la API backend** (serverless, AWS): una API REST + el endpoint de ingesta por webhook. **El bot de Telegram NO forma parte de este repo ni se desarrolla aquí**: es un consumidor externo que se creará después (BotFather, identidad, conversación y UX viven fuera). El único acoplamiento entre el bot y esta API son el `TELEGRAM_BOT_TOKEN`, el secreto del webhook y la URL que se registrará con `setWebhook` (Fase 08).
+- Un solo bot consumidor, una sola tabla (`TicketsTable`), un solo tipo de entidad (ticket).
 - Topología fijada por D-27: **un solo endpoint público** (Lambda Function URL), **una sola función Lambda** con enrutado interno (Express) y **un solo rol IAM** de aplicación. Los 4 endpoints conviven en esa función.
 - No hay en la v1: frontend del panel, multi-tenancy, colas (SQS), streams, caché, autenticación de usuarios finales, comandos/botones interactivos del bot, adjuntos (foto/voz/sticker), métricas de SLA.
 - No hay polling a Telegram (`getUpdates`): solo webhooks.

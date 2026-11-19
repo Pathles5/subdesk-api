@@ -2,7 +2,9 @@
 
 Actualizado: fase 01 · 2026-11-19
 
-> Documento para quien **integra el panel frontend** u **opera el bot**. El contrato machine-readable vinculante es `docs/api/openapi.yaml` (OpenAPI 3.1, nace en Fase 01): si alguna vez este texto y el contrato difieren, **manda el contrato** — repórtalo, no lo asumas. Aquí no hay jerga de AWS: qué envías, qué recibes y qué casos raros existen.
+> Documento para quien **integra el panel frontend** u **opera la conexión con Telegram**. El contrato machine-readable vinculante es `docs/api/openapi.yaml` (OpenAPI 3.1, nace en Fase 01): si alguna vez este texto y el contrato difieren, **manda el contrato** — repórtalo, no lo asumas. Aquí no hay jerga de AWS: qué envías, qué recibes y qué casos raros existen.
+
+> **Alcance (importante):** esto es **una API**. El bot de Telegram **no vive en este repo ni se desarrolla aquí**: es externo y se creará después (BotFather, identidad y conversación fuera de estos entregables). La API lo único que hace con Telegram es *recibir* sus webhooks autenticados con el secreto y *enviar* mensajes con `sendMessage` usando el token configurado. Quien despliegue la API y cree el bot después solo tiene que registrar la URL del webhook (`runbook.md`, Fase 08) para que todo empiece a fluir.
 
 ## Visión de conjunto
 

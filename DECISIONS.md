@@ -255,6 +255,14 @@ Formato: ID · fecha · contexto · opciones · elección · motivo · riesgo.
 - **Motivo:** la constitución es la norma suprema del repo y quien programa la lee literalmente; una excepción ya decidida que no está en el texto es una trampa, no una sutileza.
 - **Riesgo:** ninguno operativo: el código no cambia (el 403 ya estaba contratado); es alinear la norma con la decisión vigente. Próximo ID libre: **D-37**.
 
+## D-37 · 2026-11-19 · Alcance explícito: este repo entrega SOLO la API; el bot de Telegram es un consumidor externo futuro `amends` la lectura de I1 (aclarativa) y el encabezado de `api.md`/`architecture.md`
+
+- **Contexto:** el usuario pide expresamente que quede claro en toda la documentación que **esto es una API y no contiene nada del bot de Telegram, que se hará después**. La realidad técnica no cambia (nunca hubo código de bot en el repo), pero tres frases invitaban a la lectura contraria: I1 decía «un bot (webhook) + una API REST» como si ambos fueran entregables; `architecture.md` contaba el sistema desde «un usuario escribe a un bot»; y el contrato empezaba «Backend que hace de puente entre un bot y un panel». Además el brief histórico (PROMPT.md §10) ya declaraba fuera de alcance comandos/botones/interacción del bot, y el front-end del panel nunca fue entregable (§2).
+- **Opciones:** (a) no tocar nada: la constitución ya lo implicaba; (b) **enmienda explicativa de I1 + aclaración en contrato (solo `info.description`, sin tocar paths/schemas/códigos), `api.md`, `architecture.md` y README raíz**, dejando el alcance escrito con las mismas palabras del usuario; (c) reescribir I1 prohibiendo cualquier código de bot (más allá de lo pedido).
+- **Elección:** (b), por instrucción explícita del usuario el 2026-11-19 (es su OK de change control para la aclaración de I1). Fórmula vigente: *«La entrega de este repo es SOLO la API backend. El bot de Telegram NO forma parte del repo: es un consumidor externo que se creará después. Único acoplamiento: `TELEGRAM_BOT_TOKEN`, el secreto del webhook y el registro `setWebhook` (Fase 08).»* La congelación I3 no se rompe: la edición del contrato es prosa de `info.description`, no forma de API (anotado como A-00 en la spec de Fase 01).
+- **Motivo:** ambigüedad de alcance cara al usuario es deuda de producto; la respuesta barata es decirlo con su misma frase en los cuatro sitios que se leen primero. El README de la raíz (que el usuario pidió hoy) abre con esta declaración.
+- **Riesgo:** que «el bot se hará después» se lea como promesa de entrega dentro de este repo: **no lo es** — será un trabajo aparte (probablemente otro repo/sesión); este repo quedará listo para conectarlo con un `curl` de `setWebhook` y el token. Si algún día se pidiera código de bot aquí (comandos, botones, respuestas automáticas), rompería I1 línea de «no hay en la v1» y exigiría enmienda real, no aclarativa.
+
 ---
 
 # Pendientes de decisión (se resuelven en su fase, con IDs siguientes)
@@ -280,4 +288,5 @@ Formato: ID · fecha · contexto · opciones · elección · motivo · riesgo.
 | D-34 | (tabla I8a duplicaba la ruta del contrato) | 00 | resuelta: **D-34**, enmienda de constitución con OK del usuario 2026-11-19 — `docs/api/openapi.yaml` es la ÚNICA ruta del contrato |
 | D-35 | Divergencias I3↔D-19, motivos del webhook, `architecture.md` e ID de herramienta | 01 | resuelta: **D-35**, enmienda I3 con OK del usuario 2026-11-19 + A-01/A-02 de la spec de Fase 01 + actualización de `architecture.md` |
 | D-36 | Literalidad I5 «siempre 2xx» vs la excepción 403 de D-21 | 01 | resuelta: **D-36**, enmienda de literalidad a I5 con OK del usuario 2026-11-19 (no cambia conducta, solo la norma escrito lo ya decidido) |
-| D-37 → | Próximas decisiones que nazcan en cualquier fase | — | reservado a partir de **D-37** |
+| D-37 | Alcance explícito API-vs-bot (petición del usuario) | 01+ | resuelta: **D-37**, enmienda explicativa de I1 + aclaraciones en contrato/docs + README raíz (2026-11-19). El bot será trabajo **aparte** de este repo |
+| D-38 → | Próximas decisiones que nazcan en cualquier fase | — | reservado a partir de **D-38** |

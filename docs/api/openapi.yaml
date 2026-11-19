@@ -11,7 +11,7 @@ info:
   title: SubDesk API
   version: 0.1.0
   description: |
-    Backend serverless que hace de puente entre un bot de Telegram y un panel de atencion.
+    **API backend de gestion de tickets** (serverless, AWS). Entrega SOLO la API: el bot de Telegram es un consumidor **externo**, fuera de este repo, que se creara despues; la API lo unico que hace con Telegram es recibir sus webhooks (autenticados con secreto) y enviar `sendMessage` con el token configurado.
 
     - `POST /webhook/telegram` — ingesta pública (solo Telegram, autenticada con `X-Telegram-Bot-Api-Secret-Token`). Responde `200` a todo update con secreto válido para que Telegram nunca reintente.
     - `GET /api/tickets` — cola de tickets, orden `created_at` desc, filtro opcional por `status`, paginacion por cursor opaco.

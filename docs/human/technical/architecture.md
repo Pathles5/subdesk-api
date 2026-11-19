@@ -6,12 +6,14 @@ Actualizado: fase 01 · 2026-11-19
 
 ## Qué es este sistema
 
-Un backend serverless en AWS que hace de puente entre **Telegram** y un **panel de atención**:
+**Una API backend, y nada más.** Este repo entrega una API REST serverless en AWS para gestionar tickets. **El bot de Telegram no está en este repo**: es un consumidor externo que se creará después (BotFather, identidad y conversación fuera de aquí). La API solo conoce a Telegram por dos cosas: recibe sus webhooks y, cuando el panel responde, llama a `sendMessage` de la Bot API con el token que se le configure.
 
-1. Un usuario escribe a un bot de Telegram → Telegram llama a nuestro webhook.
-2. El mensaje se guarda como **ticket** en DynamoDB con estado `PENDING`.
-3. El panel (frontend aparte, no está en este repo) lista los tickets, cambia su estado y responde.
-4. La respuesta se envía al chat de Telegram y el ticket pasa a `RESOLVED`.
+Flujo completo del sistema (la parte de este repo es el punto 2 y la API de los puntos 3–4):
+
+1. Un usuario escribe **al bot** (externo, futuro) → Telegram llama a nuestro webhook.
+2. La API guarda el mensaje como **ticket** en DynamoDB con estado `PENDING`.
+3. El **panel** (frontend aparte, tampoco está en este repo) consulta la API: lista tickets, cambia estados y redacta respuestas.
+4. La API envía la respuesta al chat vía Bot API y marca el ticket `RESOLVED` **solo si Telegram devolvió OK**.
 
 Volumen previsto: bajo (una persona y sus agentes). Todas las decisiones optimizan coste $0, claridad y rapidez de arranque, no escala (constitución I1, I2).
 
@@ -106,4 +108,4 @@ Siete variables, todas a través de `src/config.js` (nunca `process.env` suelto 
 - **Fase 03:** rol IAM exacto de menor privilegio (**D-24**, el gate cfn-lint ya lo fijó D-31); spike de empaquetado con pnpm árbol plano (**D-31**).
 - **Fase 08:** estrategia de CI/CD, secretos y momento del `setWebhook` (**D-25**).
 - **Futura:** migración a `PAY_PER_REQUEST` (**D-29**, exige OK explícito del usuario).
-- Estado del registro: entradas **registradas** = D-01–D-22, D-26, D-27, D-30–D-36; **solo filas de pendientes** (sin entrada todavía) = D-23, D-24, D-25, D-28, D-29; decisión **vía de escape** futura con OK obligatorio = D-29. Próximo ID libre: **D-37** (la tabla de `DECISIONS.md` es la fuente).
+- Estado del registro: entradas **registradas** = D-01–D-22, D-26, D-27, D-30–D-37; **solo filas de pendientes** (sin entrada todavía) = D-23, D-24, D-25, D-28, D-29; decisión **vía de escape** futura con OK obligatorio = D-29. Próximo ID libre: **D-38** (la tabla de `DECISIONS.md` es la fuente).
