@@ -20,7 +20,7 @@ Una sola entidad (el ticket), una sola tabla (`TicketsTable`, DynamoDB Standard,
 | `updated_at` | `S` | sí | ISO 8601 UTC con `Z` | se refresca en **toda** mutación (`PATCH`, `reply`) — regla I5: ninguna escritura silenciosa |
 | `telegram_update_id` | `N` | sí | entero positivo | `update.update_id` de Telegram; se guarda para trazabilidad y correlación con sus logs. **La deduplicación no usa este atributo**: usa el `id` (abajo) |
 
-Tamaño objetivo de un ítem: **≤ 8 KB** (dos textos de 4096 caracteres UTF-8 como mucho, más la cabecera); en la práctica, con mensajes normales, un ítem ronda los **~2 KB**. Este número es el que manda en el cálculo de capacidad de la sección de coste.
+Tamaño de un ítem: **objetivo típico ~2 KB** (mensajes normales); 8 KB como cota de diseño cómoda; **peor caso UTF-8 ~33 KB** (dos campos de 4096 *caracteres* × hasta 4 *bytes* — ver "caracteres vs bytes" en la sección de coste). El cálculo de capacidad se hace con los bytes reales del ítem, no con la cota.
 
 ## El `id` determinista: deduplicación exacta con una sola tabla
 
