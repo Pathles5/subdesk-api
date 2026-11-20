@@ -2,7 +2,7 @@
 
 Actualizado: fase 03 · 2026-11-20
 
-> Documento para **levantar y comprobar el proyecto en local**. La topología y las reglas de capas están en `architecture.md`; el contrato es `docs/api/openapi.yaml`; las decisiones con su historia, en `DECISIONS.md` (se enlazan por ID). Despliegue, `setWebhook`, rotación y coste: `docs/human/runbook.md` (existe desde la Fase 03 con la sección de despliegue en seco; se completa en Fase 08).
+> Documento para **levantar y comprobar el proyecto en local**. La topología y las reglas de capas están en `architecture.md`; el contrato es `docs/api/openapi.yaml`; las decisiones con su historia, en `DECISIONS.md` (se enlazan por ID). Despliegue, `setWebhook`, rotación y coste: `docs/human/runbook.md` (existe desde la Fase 03 con la sección de despliegue en seco; la sección pipeline llega en la **Fase 04** y el completo en la 09 — D-42).
 
 ## Arranque local
 
@@ -34,7 +34,7 @@ No hay comando `deploy` ni nada que toque AWS desde este repo en local: la infra
 
 `cfn-lint` es una herramienta Python, no un paquete de Node, así que **no** entra en `package.json` ni en `pnpm-lock.yaml`: se instala en el entorno del desarrollador y el script `validate:iac` solo la invoca. Estado de esta máquina: **`cfn-lint` 1.61.0**, instalado con `python -m pip install --user cfn-lint` (OSS, sin cuentas, sin coste: I2), con el visto explícito del usuario del 2026-11-20. El ejecutable queda en `%APPDATA%\Python\Python313\Scripts`, que debe estar en el **PATH de usuario**; si no lo está, el fallo es «`cfn-lint` no se reconoce como comando», no un error de la plantilla. Se comprueba con `cfn-lint --version`.
 
-`sam` y `aws` **no** están instalados a propósito: ninguna compuerta los necesita (D-31) y solo harían falta para el despliegue y las lecturas de premisas de la Fase 08, donde su instalación se pedirá con visto (I6). Procedimiento completo: `docs/human/runbook.md` §1.
+`sam` y `aws` **no** están instalados a propósito: ninguna compuerta los necesita (D-31) y solo los necesita la **pipeline** (Fase 04, D-42) en su runner; para lecturas de premisas puede pedirse el `aws` local con visto (I6). Procedimiento completo: `docs/human/runbook.md` §1.
 
 ### Smoke manual (los 5 casos verificados en seco)
 
@@ -85,7 +85,7 @@ Qué significa cada `401`/`403` que ya puedes ver hoy:
 |---|---|---|
 | `401 UNAUTHORIZED` — `missing x-api-key header` | la petición no trae `x-api-key` (o viene vacía) | añade la cabecera con tu `ADMIN_API_KEY` |
 | `403 FORBIDDEN` — `invalid api key` | la cabecera llega pero **no** coincide con `ADMIN_API_KEY` | revisa el valor en `.env` / en el stack; se compara con `timingSafeEqual` sobre digestos SHA-256, así que ni una diferencia de longitud pasa |
-| `403 FORBIDDEN` — `invalid webhook secret` | falta `X-Telegram-Bot-Api-Secret-Token` o difiere de `TELEGRAM_WEBHOOK_SECRET` | el secreto registrado con `setWebhook` debe ser **el mismo** que el de la variable de entorno (runbook, Fase 08); si no lo es, todo el webhook falla en silencio con 403 (riesgo anotado en D-21) |
+| `403 FORBIDDEN` — `invalid webhook secret` | falta `X-Telegram-Bot-Api-Secret-Token` o difiere de `TELEGRAM_WEBHOOK_SECRET` | el secreto registrado con `setWebhook` debe ser **el mismo** que el de la variable de entorno (runbook, Fase 09); si no lo es, todo el webhook falla en silencio con 403 (riesgo anotado en D-21) |
 | `501 INTERNAL` — `not implemented yet — Fase N` | el andamiaje aún no tiene handler | espera a la fase indicada; no es un fallo |
 
 ## Política de logs aplicada (D-18)

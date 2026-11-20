@@ -4,7 +4,7 @@ Actualizado: fase 03 · 2026-11-20
 
 > Documento para quien **integra el panel frontend** u **opera la conexión con Telegram**. El contrato machine-readable vinculante es `docs/api/openapi.yaml` (OpenAPI 3.1, nace en Fase 01): si alguna vez este texto y el contrato difieren, **manda el contrato** — repórtalo, no lo asumas. Aquí no hay jerga de AWS: qué envías, qué recibes y qué casos raros existen.
 
-> **Alcance (importante):** esto es **una API**. El bot de Telegram **no vive en este repo ni se desarrolla aquí**: es externo y se creará después (BotFather, identidad y conversación fuera de estos entregables). La API lo único que hace con Telegram es *recibir* sus webhooks autenticados con el secreto y *enviar* mensajes con `sendMessage` usando el token configurado. Quien despliegue la API y cree el bot después solo tiene que registrar la URL del webhook (`runbook.md`, Fase 08) para que todo empiece a fluir.
+> **Alcance (importante):** esto es **una API**. El bot de Telegram **no vive en este repo ni se desarrolla aquí**: es externo y se creará después (BotFather, identidad y conversación fuera de estos entregables). La API lo único que hace con Telegram es *recibir* sus webhooks autenticados con el secreto y *enviar* mensajes con `sendMessage` usando el token configurado. Quien despliegue la API y cree el bot después solo tiene que registrar la URL del webhook (`runbook.md`, Fase 09) para que todo empiece a fluir.
 
 ## Visión de conjunto
 
@@ -15,14 +15,14 @@ Actualizado: fase 03 · 2026-11-20
 | `PATCH` | `/api/tickets/{id}` | cambiar el estado de un ticket (sin responder al usuario) | cabecera `x-api-key` | `200` con el ticket actualizado |
 | `POST` | `/api/tickets/{id}/reply` | responder al usuario **en su chat de Telegram** y cerrar el ticket | cabecera `x-api-key` | `200` con el ticket `RESOLVED` |
 
-Las cuatro rutas conviven en una sola URL pública. En los ejemplos uso el placeholder `https://SU-URL.lambda-url.us-east-1.on.aws`; la URL real sale del despliegue de la Fase 08 y queda registrada en el `README.md` de la raíz. El campo JSON `id` de la ruta es el identificador opaco del ticket (un UUID; trátalo como caja negra).
+Las cuatro rutas conviven en una sola URL pública. En los ejemplos uso el placeholder `https://SU-URL.lambda-url.us-east-1.on.aws`; la URL real sale del despliegue de la Fase 04 (pipeline — D-42) y queda registrada en el `README.md` de la raíz. El campo JSON `id` de la ruta es el identificador opaco del ticket (un UUID; trátalo como caja negra).
 
 ### Autenticación, en dos frases
 
 - **`/api/*`** (lo que llama tu panel): cabecera `x-api-key` con el valor de la variable de despliegue `ADMIN_API_KEY`. Falta o está vacía → `401`; presente pero distinta → `403`. La comprobación ocurre antes de tocar la base de datos.
 - **`/webhook/telegram`** (lo que llama Telegram): cabecera `X-Telegram-Bot-Api-Secret-Token` con el secreto que se registró al configurar el webhook (variable `TELEGRAM_WEBHOOK_SECRET`). Ausente o distinto → `403`. Es **la única excepción** al `200` garantizado del webhook (se explica más abajo).
 
-En este documento todos los valores son placeholders (`SU_CLAVE`, `SU_SECRETO`, `SU-URL`); ningún valor real va en el repo ni en la documentación. La rotación de ambas claves es una operación documentada en el `runbook.md` (Fase 08).
+En este documento todos los valores son placeholders (`SU_CLAVE`, `SU_SECRETO`, `SU-URL`); ningún valor real va en el repo ni en la documentación. La rotación de ambas claves es una operación documentada en el `runbook.md` (Fase 09).
 
 ---
 
@@ -59,7 +59,7 @@ Ejemplos de ignoro:
 { "ignored": "duplicate" }
 ```
 
-**El único `403` del webhook:** si la cabecera `X-Telegram-Bot-Api-Secret-Token` falta o no coincide. No rompe la promesa de arriba porque los reintentos legítimos de Telegram **siempre** llevan el secreto registrado; quien falla el secreto no es Telegram reintentando un update, es un tercero, y rechazarlo no provoca bucle de reintento alguno. Si al desplegar ves `403` masivos, casi seguro es un secreto de despliegue distinto del registrado con `setWebhook` (se comprueba en la prueba E2E de Fase 08).
+**El único `403` del webhook:** si la cabecera `X-Telegram-Bot-Api-Secret-Token` falta o no coincide. No rompe la promesa de arriba porque los reintentos legítimos de Telegram **siempre** llevan el secreto registrado; quien falla el secreto no es Telegram reintentando un update, es un tercero, y rechazarlo no provoca bucle de reintento alguno. Si al desplegar ves `403` masivos, casi seguro es un secreto de despliegue distinto del registrado con `setWebhook` (se comprueba en la prueba E2E de Fase 09).
 
 Respuestas de este endpoint: `200` (creado o ignorado) y `403` (secreto inválido). No hay más.
 

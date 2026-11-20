@@ -8,7 +8,7 @@ flowchart LR
         GATES["compuertas<br/>pnpm lint/test<br/>validate:api/validate:iac<br/>check.ps1"]
     end
 
-    subgraph ci["GitHub Actions (Fase 08 — futuro)"]
+    subgraph ci["GitHub Actions — pipeline (Fase 04; D-42: unico ejecutor de AWS)"]
         Wf["deploy.yml<br/>pnpm install --frozen-lockfile --prod<br/>zip artefacto (nodeLinker hoisted, D-31)"]
         SECRETS["GitHub Secrets<br/>TELEGRAM_BOT_TOKEN · ADMIN_API_KEY<br/>TELEGRAM_WEBHOOK_SECRET"]
     end

@@ -34,8 +34,8 @@ La topología es la de siempre —tabla, función, rol, grupo de logs y URL—, 
 | Herramienta | Cómo se instaló | Estado |
 |---|---|---|
 | `cfn-lint` **1.61.0** | `python -m pip install --user cfn-lint` (OSS, sin cuentas, sin valores) — visto del usuario 2026-11-20 | instalada; el ejecutable vive en `%APPDATA%\Python\Python313\Scripts`, que debe estar en el **PATH de usuario** o `pnpm run validate:iac` fallará con «cfn-lint no se reconoce» |
-| `sam` (AWS SAM CLI) | — | **no instalada**: no la necesita ninguna compuerta. Su instalación se propondrá con visto del usuario en **Fase 08** (empaqueta y despliega) |
-| `aws` (AWS CLI) | — | **no instalada**: solo haría falta para las lecturas de premisas de §5 y para la limpieza de §4. También se pide en Fase 08, con credenciales del usuario, nunca con valores en el repo |
+| `sam` (AWS SAM CLI) | — | **no instalada**: no la necesita ninguna compuerta. La instala el runner de la pipeline en **Fase 04** (D-42: `deploy.yml` es el ejecutor; localmente sigue sin hacer falta) |
+| `aws` (AWS CLI) | — | **no instalada**: solo haría falta para las lecturas de premisas de §5 y para la limpieza de §4. Puede pedirse en **Fase 04** para las lecturas de §5 (o aportarse las evidencias por consola), con credenciales del usuario, nunca con valores en el repo |
 | `@mermaid-js/mermaid-cli` 12.2.0 | devDependency de pnpm (D-33/D-41) | para exportar los `.svg` de `diagrams/`; nada que ver con el despliegue |
 
 ### Árbol plano del artefacto (spike D-31, local y sin nube)
@@ -52,7 +52,7 @@ Get-ChildItem node_modules -Recurse -Attributes ReparsePoint | Measure-Object   
 
 La evidencia (cero symlinks/junctions y tamaño del zip frente al límite de 50 MB directo) se registra en `docs/specs/03-iac/tasks.md` T-06 y cierra la fila D-31 de `DECISIONS.md`. El empaquetado real **no usa `sam build`** (D-31): `CodeUri: ./` apunta al árbol del repo — y aquí vive un hazard documentado en §2.5 abajo (`.gitignore` + el filtrado de `sam package`).
 
-### 2.5 Hazard del empaquetado — precondición del pipeline de Fase 08 (corrección D3, revisión fresh-eyes 2026-11-20)
+### 2.5 Hazard del empaquetado — precondición del pipeline de **Fase 04** (corrección D3, revisión fresh-eyes 2026-11-20; D-42)
 
 `sam package`/`sam deploy` aplican las reglas de **`.gitignore`** al comprimir el `CodeUri`. Como `.gitignore` contiene `node_modules/`, la receta ingenua puede producir un ZIP **sin dependencias** (la Lambda arrancaría con `ERR_MODULE_NOT_FOUND: express`) — o, al revés, sin filtrado, llevarse devDeps y `.bin` dentro. Regla determinista para F08 (ninguna se ejecuta hoy):
 
@@ -64,9 +64,9 @@ La evidencia (cero symlinks/junctions y tamaño del zip frente al límite de 50 
 
 `FunctionName: TicketApiFunction` está fijado a propósito (determinismo del log group y del ARN literal del rol, §3). Consecuencias que el operador debe conocer: (a) un **segundo stack** en la misma cuenta+región que reutilice esta plantilla **colisiona** — el repo-hijo del bot (D-38) debe usar nombres propios; (b) un `sam delete` interrumpido puede dejar la función o el log group huérfanos y hacer fallar el recreate (mitigación: `get-function`/`list-functions` de solo lectura antes de recrear, y borrar el stack completo en vez de recursos sueltos); (c) si esto molestara en F08, la alternativa limpia es `!Sub "${AWS::StackName}-TicketApiFunction"` reconstruyendo igual el ARN de logs — enmienda registrada entonces, con visto.
 
-## 2. Despliegue real — **Fase 08** (propuesta documentada; no ejecutada)
+## 2. Despliegue real — **Fase 04, vía pipeline** (D-42; propuesta documentada; no ejecutada)
 
-Nada de este bloque se ha corrido. Entra en vigor en la Fase 08, previa instalación autorizada de `sam`/`aws` y **con visto explícito del usuario antes de cada comando** (I6). La decisión de estrategia de CI/CD y del momento del `setWebhook` es la fila **D-25** de pendientes.
+Nada de este bloque se ha corrido. Con el reorder pipelines-first (**D-42**) entra en vigor en la **Fase 04** y su ejecutor es `deploy.yml` en GitHub Actions — nunca un comando tecleado en local; el visto del usuario se materializa como **aprobación del entorno `Production`** (D-43/OIDC). La estrategia de CI/CD sigue siendo la fila **D-25** (se resuelve en esa fase); el `setWebhook` real se movió a la **Fase 09**.
 
 Los secretos viajan **solo como nombres de variables de GitHub Actions** — nunca con su valor en un archivo del repo ni en la salida del log (I4/D-17). Cada nombre de la izquierda es el `Parameter` del `template.yaml` (con `NoEcho: true`); el de la derecha, el secreto de GitHub:
 
@@ -98,13 +98,13 @@ La plantilla declara tres `Outputs` (spec §4 de Fase 03):
 
 | Output | Qué es | Para qué se usa |
 |---|---|---|
-| `FunctionUrl` | URL pública HTTPS de la función (`AWS::Lambda::Url`, `AuthType: NONE`) | base de todos los `curl` del panel y del `setWebhook` (Fase 08); es el valor que se documenta en el `README.md` cuando exista |
+| `FunctionUrl` | URL pública HTTPS de la función (`AWS::Lambda::Url`, `AuthType: NONE`) | base de todos los `curl` del panel y del `setWebhook` (Fase 09); es el valor que se documenta en el `README.md` cuando exista |
 | `TableName` | nombre físico de `TicketsTable` | lo consume `TABLE_NAME` de la Lambda (D-17); para inspección manual en la consola de DynamoDB |
 | `LogsGroupName` | `/aws/lambda/TicketApiFunction` con `RetentionInDays: 30` | destino de los logs JSON de D-18; desde ahí se abre CloudWatch Insights |
 
 El nombre del grupo de logs es predecible porque la función fija `FunctionName: TicketApiFunction`: por eso el `Resource` de los permisos de logs del rol (D-24) puede escribirse literal y la relación función ↔ grupo queda determinista.
 
-Dónde: consola de CloudFormation → stack → pestaña **Outputs**; o en solo lectura (necesita `aws` instalado y credenciales del usuario, Fase 08):
+Dónde: consola de CloudFormation → stack → pestaña **Outputs**; o en solo lectura (necesita `aws` instalado y credenciales del usuario — Fase 04, si se prefieren lecturas CLI a la consola):
 
 ```bash
 aws cloudformation describe-stacks --stack-name <NOMBRE_DEL_STACK> --region us-east-1 \
@@ -136,9 +136,9 @@ Notas operativas:
 
 El invariante I2/D-26 dice: una sola región (`us-east-1`), una sola tabla `Standard` `PROVISIONED` 25/25 sin auto scaling, una Lambda Event con Function URL, retención de logs ≤ 30 días. Coste esperado: **$0** mientras la franquicia de la cuenta esté activa. Techo conocido si la franquicia **no** aplicase a esta cuenta: **~$14,04–14,24/mes** por la tabla (D-26), no por picos de tráfico — con capacidad fija el exceso responde con `ThrottlingException`, no con factura.
 
-**Estado de las premisas de C8 (nota formal, 2026-11-20).** El usuario pospuso explícitamente a la **Fase 08** las cuatro comprobaciones de la Fase 03, porque no aportó las lecturas de solo lectura en esta fase y el orquestador las cerrará antes del primer despliegue. **Ninguna se salta**: son bloqueantes del despliegue, no de la validación estática.
+**Estado de las premisas de C8 (nota formal, actualizada 2026-11-20).** El usuario las pospuso primero a la antigua Fase 08 y, tras el reorder **D-42**, su sede es la **Fase 04 (pipeline)**: deben evidenciarse **antes** del primer apilado real que ejecuta `deploy.yml`. **Ninguna se salta**: son bloqueantes del despliegue, no de la validación estática.
 
-| Premisa | Cómo se comprueba (Fase 08) | Referencia |
+| Premisa | Cómo se comprueba (Fase 04, pipeline) | Referencia |
 |---|---|---|
 | Function URL disponible en `us-east-1` y `nodejs22.x` vigente en esa región (D-40) | consulta de la documentación de AWS (funciona sin credenciales: es lectura de quotas/región); en la cuenta, confirmación tras el deploy con `aws lambda get-function --function-name TicketApiFunction --region us-east-1` (solo lectura, con visto) | `docs/specs/03-iac/tasks.md` T-09 → fila 08 de `docs/specs/INDEX.md` |
 | Franquicia 25 RCU / 25 WCU activa en esta cuenta | consola **Billing → Free Tier** o `aws ce get-free-tier-usage` (solo lectura) | D-26 riesgo 1 |
@@ -149,9 +149,9 @@ Comprobación de gasto, una vez desplegado, siempre de solo lectura: `aws ce get
 
 Si alguna premisa resulta **falsa**, el camino no es subir capacidad ni cambiar la tabla a `PAY_PER_REQUEST` por iniciativa propia: es decisión registrada + OK explícito del usuario (vía de escape de D-26, fila D-29 de pendientes).
 
-## 6. Qué falta para que este runbook esté completo (Fase 08)
+## 6. Qué falta para que este runbook esté completo (sección pipeline en F04; cierre en F09)
 
-La compuerta de Fase 08 exige el runbook completo (AGENTS §4). Al aterrizar la fase hay que añadir aquí, con comandos exactos y placeholders:
+La compuerta de Fase 09 exige el runbook completo (AGENTS §4, numeración post-D-42). Al aterrizar F04 se añade la sección de la pipeline (despliegue/prune ejecutados por Actions); al aterrizar F09, con comandos exactos y placeholders:
 
 1. **`setWebhook`** — el `curl` real con `<FUNCTION_URL>`, `<TELEGRAM_BOT_TOKEN>` y el mismo `<TELEGRAM_WEBHOOK_SECRET>` que la variable de entorno (si difieren, todo el webhook falla en silencio con `403`; riesgo anotado en D-21). Su forma ya está adelantada en el `README.md` de la raíz.
 2. **Rotación** de `ADMIN_API_KEY` y `TELEGRAM_WEBHOOK_SECRET` (`--parameter-overrides` sobre el stack existente + re-`setWebhook` cuando cambie el secreto).

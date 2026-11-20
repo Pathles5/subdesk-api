@@ -394,7 +394,7 @@ $docRequired = @(
     @{ from = 3; rel = "docs/human/runbook.md";                      what = "runbook" },
     @{ from = 3; rel = "docs/human/diagrams/deployment.mmd";         what = "deployment diagram (Mermaid source)" },
     @{ from = 3; rel = "docs/human/diagrams/component.mmd";          what = "component diagram (Mermaid source)" },
-    @{ from = 4; rel = "docs/human/diagrams/api-flow.mmd";           what = "API flow diagram (Mermaid source)" },
+    @{ from = 5; rel = "docs/human/diagrams/api-flow.mmd";           what = "API flow diagram (Mermaid source)" },
     @{ from = 9; rel = "docs/human/functional/product.md";           what = "functional product documentation" },
     @{ from = 9; rel = "docs/human/technical/decisions-summary.md";  what = "human-readable decisions summary" }
 )

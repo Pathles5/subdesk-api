@@ -1,0 +1,17 @@
+# Tasks — Fase 04 Pipeline de despliegue + primer apilado + prune
+
+Estado de fase: spec (espejo de `docs/specs/INDEX.md`)
+
+| ID | Tarea | Estado | Responsable | Solución validada | Docs (I8) | Evidencia |
+|---|---|---|---|---|---|---|
+| T-01 | Spec + tasks de la fase (resolución propuesta D-25, diseño §4, seguridad §5) | done | orquestador | — (la spec ES la propuesta; visto sobre T-02/T-03) | `docs/specs/04-pipeline/spec.md` (proceso) | spec creada 2026-11-20 |
+| T-02 | Resolver **D-25** (estrategia CI/CD: trigger main+dispatch, environment Production como mecanismo de visto, rollback=revert+pipeline, prune con doble confirmación; setWebhook a F09) | propuesta | orquestador | — (pendiente visto: spec §4) | runbook §2 (T-08), `operations.md` (pipeline como ejecutor) | — |
+| T-03 | Bootstrap OIDC en la **consola del usuario** (no delegable): provider `token.actions.githubusercontent.com`, rol `SubDeskCiDeployRole` (trust con condición environment + policy exacta spec §5), alerta $0 creada; en GitHub: environment `Production` + required reviewer + 6 secretos por nombre | propuesta | usuario (ejecuta) + orquestador (JSON y policy exactos, verificación por lectura con visto) | — (pendiente visto: spec §5; el orquestador entrega primero el JSON listo para pegar) | runbook §2.7 nuevo (dónde vive cada cosa) | — |
+| T-04 | `.github/workflows/deploy.yml` + `prune.yml` + `.samignore` | pendiente | devops | — (tras T-02/T-03) | sin impacto (docs en T-08) | — |
+| T-05 | `scripts/package-lambda.mjs` (staging + asserts del ZIP) + `scripts/smoke-live.mjs` (15 casos de la colección contra la URL viva) | pendiente | implementador | — | `operations.md` (cómo correr el smoke a mano) | — |
+| T-06 | Asserts nuevos en `check.ps1`: cero access keys en `.github/**` salvo OIDC; condición del trust documentada presente en runbook | pendiente | orquestador | — | sin impacto | — |
+| T-07 | **Primer deploy real**: push `main` → `deploy.yml` → **el usuario aprueba el environment** → stack → smoke 15/15 contra internet. (Acción externa: su visto ES la aprobación del workflow.) | pendiente | orquestador (propone push con comando exacto) + usuario (aprueba en GitHub) | — | README con la URL final; CHANGELOG 0.1.0-F04; runbook §2 realidad | — |
+| T-08 | Evidencias C8 (4 premisas: 2 por el propio deploy + 2 pantalla del usuario: franquicia, Paid, alerta $0) cerradas en `tasks.md` | pendiente | usuario + orquestador | — | runbook §5 actualizado | — |
+| T-09 | Compuertas 7/7 + revisión fresh-eyes + cierre | pendiente | orquestador → revisor → documentador | — | salidas verbatim | — |
+
+Convenciones: `docs/harness/tasks-format.md`. Regla de la fase (D-42/I6): **cualquier comando AWS desde local queda prohibido durante toda la fase** — el orquestador no ejecuta `aws`/`sam` ni de escritura; las lecturas puntuales que hicieran falta se piden con visto expreso. El bootstrap T-03 lo ejecuta únicamente el usuario en su consola.

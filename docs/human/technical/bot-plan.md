@@ -33,7 +33,7 @@ Dos stacks SAM, una cuenta, dos Function URLs. La cuenta sigue siendo $0: cada L
 
 1. **Formato**: el bot reenvía a SubDesk un objeto **update de Telegram válido** (`update_id`, `message.chat.id`, `message.text`, `message.from…`). La API no distingue si el texto lo escribió el usuario o lo compuso el bot tras un botón: para ella es un mensaje.
 2. **Idempotencia**: los `update_id` sintéticos del bot (reenvíos compuestos tras pulsaciones de botón) parten de **10¹⁵** hacia arriba; Telegram usa enteros muy por debajo en la práctica. El dedupe de SubDesk (`id` = uuidv5 del `update_id`, D-19) funciona igual para reales que sintéticos.
-3. **Secreto**: el mismo `TELEGRAM_WEBHOOK_SECRET` viaja en la cabecera en ambos saltos (Telegram→bot no lo usa: el secreto lo inventamos nosotros; bot→API sí). El secreto entre bot y API es un tercer valor, **distinct** — lo define D-38 en su riesgo 3: cuando el bot pasa a ser el webhook público, SubDesk puede aceptar el secreto que comparta con el bot (mismo nombre de variable, valor nuevo en el redeploy de Fase 08).
+3. **Secreto**: el mismo `TELEGRAM_WEBHOOK_SECRET` viaja en la cabecera en ambos saltos (Telegram→bot no lo usa: el secreto lo inventamos nosotros; bot→API sí). El secreto entre bot y API es un tercer valor, **distinct** — lo define D-38 en su riesgo 3: cuando el bot pasa a ser el webhook público, SubDesk puede aceptar el secreto que comparta con el bot (mismo nombre de variable, valor nuevo en el redeploy que ejecuta la pipeline — Fase 04, D-42).
 4. **Orden de ack (crítico)**: el bot responde 200 a Telegram **solo después** de que SubDesk devuelva 2xx. Así el reintento de la plataforma reinyecta el update y el dedupe lo absorbe. Si el bot ackea a ciegas y SubDesk estaba caído, el mensaje se pierde para siempre.
 5. **Botones**: `sendMessage` con `reply_markup` (inline keyboard); la pulsación llega como `callback_query` al webhook del bot, que responde con `answerCallbackQuery` + `editMessageText`. Nada de esto toca SubDesk **nunca**.
 
@@ -54,7 +54,7 @@ Dos stacks SAM, una cuenta, dos Function URLs. La cuenta sigue siendo $0: cada L
 
 ## 6 · Secuencia de aterrizaje (dependencias de fechas)
 
-1. Aquí: **Fases 02–07** (código + tests) → **Fase 08**: deploy de la API y `setWebhook` apuntando **directamente a SubDesk** (modo tonto: el usuario escribe → ticket; ya vale para producción sin bot con personalidad).
+1. Aquí: **Fases 02–08** (la 04 es la pipeline, que hace el **primer deploy real** de la app — D-42; las 05–08 llenan el negocio) → **Fase 09**: `setWebhook` apuntando **directamente a SubDesk** (modo tonto: el usuario escribe → ticket; ya vale para producción sin bot con personalidad).
 2. Repo-hijo: nace con el harness copiado (misma compuerta `check.ps1`, pnpm I4b, D-27 topología, D-18 logs). Su Fase 08' hace `setWebhook` → URL del bot, y redeploya SubDesk con el secreto compartido actualizado.
 3. Panel: consume la API directamente (fase 11). Ni se entera de que el bot existe.
 

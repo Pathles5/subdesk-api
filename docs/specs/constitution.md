@@ -4,7 +4,7 @@ Inmutables del proyecto. Ninguna spec ni implementación puede contradecir esto.
 Si hay conflicto entre una spec y la constitución, gana la constitución y la spec se reescribe.
 
 ## I1. Alcance
-- **La entrega de este repo es SOLO la API backend** (serverless, AWS): una API REST + el endpoint de ingesta por webhook. **El bot de Telegram NO forma parte de este repo ni se desarrolla aquí**: es un consumidor externo que se creará después (BotFather, identidad, conversación y UX viven fuera). El único acoplamiento entre el bot y esta API son el `TELEGRAM_BOT_TOKEN`, el secreto del webhook y la URL que se registrará con `setWebhook` (Fase 08).
+- **La entrega de este repo es SOLO la API backend** (serverless, AWS): una API REST + el endpoint de ingesta por webhook. **El bot de Telegram NO forma parte de este repo ni se desarrolla aquí**: es un consumidor externo que se creará después (BotFather, identidad, conversación y UX viven fuera). El único acoplamiento entre el bot y esta API son el `TELEGRAM_BOT_TOKEN`, el secreto del webhook y la URL que se registrará con `setWebhook` (Fase 09, post-D-42).
 - Un solo bot consumidor, una sola tabla (`TicketsTable`), un solo tipo de entidad (ticket).
 - Topología fijada por D-27: **un solo endpoint público** (Lambda Function URL), **una sola función Lambda** con enrutado interno (Express) y **un solo rol IAM** de aplicación. Los 4 endpoints conviven en esa función.
 - No hay en la v1: frontend del panel, multi-tenancy, colas (SQS), streams, caché, autenticación de usuarios finales, comandos/botones interactivos del bot, adjuntos (foto/voz/sticker), métricas de SLA.
@@ -67,6 +67,7 @@ Por indicación explícita del usuario, el proyecto **no usa npm ni yarn**: **pn
 - **Revisor fresh-eyes:** al cierre de cada fase un subagente revisor evalúa la entrega contra los criterios de la spec.
 - **Decisions:** toda decisión de diseño/arquitectura queda escrita en `DECISIONS.md` (append-only, IDs `D-xx`) con opciones, elección, motivo y riesgo.
 - **Nada desplegable se ejecuta sin el usuario:** `deploy`, `remove`, `setWebhook` y cualquier llamada que cree o modifique recursos reales se propone con comandos exactos y la ejecuta el orquestador solo con visto explícito del usuario.
+- **La pipeline es el único ejecutor de AWS (D-42, enmienda con visto del usuario 2026-11-20):** todo cambio de estado en AWS —crear, actualizar, borrar (*prune*)— ocurre **exclusivamente** desde GitHub Actions (`deploy.yml`; `prune.yml` con aprobación manual obligatoria). Desde local solo hay validación estática (compuertas) y lecturas de solo lectura autorizadas explícitamente. El primer apilado ocurre en la **Fase 04** con la app stub; el visto del usuario se materializa como *aprobación del entorno de GitHub* del workflow, auditada, en lugar de comandos tecleados en una máquina.
 - **Enmiendas:** esta constitución solo se modifica con aprobación explícita del usuario; toda enmienda se registra en `DECISIONS.md`.
 
 ## I7. Verificación
@@ -78,7 +79,7 @@ Por indicación explícita del usuario, el proyecto **no usa npm ni yarn**: **pn
 - Prueba local: `pnpm run dev` levanta la **misma app Express** en `PORT` sin adaptador Lambda; los tests de negocio corren contra ella o contra los services, nunca contra AWS ni contra Telegram.
 - Revisión IAM manual contra I4 en cada fase de infra, y captura de la **alerta de facturación en $0** como evidencia antes del primer despliegue.
 - Tests solo de reglas de negocio y contratos (ingestión, enum de estado, orden/filtro de listado, reply con Telegram simulado, auth). Nada de tests cosméticos ni de captura.
-- Pruebas end-to-end contra Telegram real: solo en Fase 08, con visto explícito del usuario, y con cuenta/bot de desarrollo.
+- Pruebas end-to-end contra Telegram real: solo en Fase 09 (tras el reorder D-42; antes F08), con visto explícito del usuario, y con cuenta/bot de desarrollo.
 
 ## I8. Documentación para humanos (decisión D-32)
 La entrega de este proyecto **no es solo código**: un backend que nadie entiende no es utilizable. La documentación para personas es parte del definition-of-done de cada fase y **se actualiza tras cada tarea completa y validada** (no al final del proyecto, no "cuando toque").
@@ -123,9 +124,9 @@ Reglas del mapa: el **contrato** vive en `docs/api/openapi.yaml` (ruta estable p
 | 01 | `api/openapi.yaml`, `functional/api.md`, `technical/data-model.md` |
 | 02 | `README.md` (arranque, variables, comandos pnpm), `CHANGELOG.md`, `technical/operations.md` (dev local), scripts `validate:api` + test de contrato |
 | 03 | `diagrams/deployment.mmd` + `.svg`, `technical/operations.md` (IAM, límites, retención de logs), `runbook.md` (sección de despliegue en seco) |
-| 04–07 | por cada endpoint: `functional/api.md` + `api/openapi.yaml` + `diagrams/api-flow.mmd` actualizados y test de contrato en verde |
-| 08 | `runbook.md` completo (deploy real, `setWebhook` con `curl` exacto, rotación, rollback), `README.md` con la URL final y resultados E2E anotados |
-| 09 | `functional/product.md`, `technical/decisions-summary.md`, pase final de frescura y límites conocidos |
+| 04 | `runbook.md` §pipeline (comandos de `deploy.yml`/`prune.yml` con placeholders, evidencias C8) y workflow en `.github/workflows/` |
+| 05–08 | por cada endpoint: `functional/api.md` + `api/openapi.yaml` + `diagrams/api-flow.mmd` actualizados y test de contrato en verde (numeración post-D-42: ingesta 05, lectura 06, mutación 07, reply 08) |
+| 09 | `runbook.md` completo (`setWebhook` con `curl` exacto, rotación, rollback), `README.md` con la URL final y resultados E2E anotados, `functional/product.md` y `technical/decisions-summary.md`, pase final de frescura y límites conocidos |
 
 ### I8d. Elecciones de formato (vinculantes)
 - **Contrato:** OpenAPI **3.1** en YAML, versionado en `info.version` y alineado con `CHANGELOG.md`. Se elige OpenAPI antes que "Swagger" como marca: Swagger UI es solo un visor; el activo es el documento. El visor se genera en local (`@redocly/cli` o `swagger-cli` como **devDependency**) → **prohibido** enlazar CDN o servicios de documentación hosted (coherente con I4 y con no añadir superficies).

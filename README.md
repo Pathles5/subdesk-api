@@ -28,13 +28,13 @@ Actualizado: fase 03 · 2026-11-20
 | 00 | Arquitectura: AWS SAM, 1 Lambda + Express + Function URL, pnpm, contrato de variables, política de logs | ✅ `approved` |
 | 01 | Modelo de datos (`TicketsTable`) y contratos de los 4 endpoints congelados (OpenAPI 3.1) | ✅ `approved` |
 | 02 | Scaffold del proyecto (ESM, lint, scripts, tests, `.env.example`) — **los comandos `pnpm` y el código `src/` ya existen** | ✅ entregado (cierre: compuertas + revisión fresh-eyes) |
-| 03 | Infraestructura como código (`template.yaml`: tabla + Lambda + URL + IAM), validada sin desplegar | ✅ (cerrada 2026-11-20; el deploy NO — es Fase 08 con tu visto) |
-| 04 | Ingesta `POST /webhook/telegram` | ⏳ |
-| 05 | Lectura `GET /api/tickets` + auth | ⏳ |
-| 06 | Mutación `PATCH /api/tickets/{id}` | ⏳ |
-| 07 | Respuesta `POST /api/tickets/{id}/reply` | ⏳ |
-| 08 | CI/CD + despliegue + registro del webhook (**siempre con tu visto previo**: acciones externas) | ⏳ |
-| 09 | Hardening, revisión de coste y entrega final | ⏳ |
+| 03 | Infraestructura como código (`template.yaml`: tabla + Lambda + URL + IAM), validada sin desplegar | ✅ (cerrada 2026-11-20; el deploy nunca es local — es la pipeline, Fase 04, D-42) |
+| 04 | **Pipeline de despliegue** (`deploy.yml`/`prune.yml`, OIDC, primer apilado stub, evidencias de coste) — **solo la pipeline toca AWS** (D-42) | ⏳ siguiente |
+| 05 | Ingesta `POST /webhook/telegram` | ⏳ |
+| 06 | Lectura `GET /api/tickets` + auth | ⏳ |
+| 07 | Mutación `PATCH /api/tickets/{id}` | ⏳ |
+| 08 | Respuesta `POST /api/tickets/{id}/reply` | ⏳ |
+| 09 | `setWebhook` + E2E con bot + hardening + entrega final | ⏳ |
 
 Progreso real y pendientes: `docs/specs/INDEX.md` (única fuente de verdad). Decisiones con su historia: `DECISIONS.md`.
 
