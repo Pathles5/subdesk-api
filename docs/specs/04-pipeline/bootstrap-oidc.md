@@ -10,7 +10,16 @@ Console → IAM → Identity providers → Add provider:
 
 ## 2. AWS — Rol de despliegue `SubDeskCiDeployRole`
 
-IAM → Roles → Create role → Trusted identity **Web identity** → provider del paso 1 → **Custom** con este trust (ajusta `159177056493`; el sub de GitHub environments es exacto):
+**Guía de consola paso a paso (T-03; para llevar al cliente, replicar igual con sus valores):**
+
+1. IAM → **Roles → Create role**. Trusted identity: **Web identity** → Identity provider: `token.actions.githubusercontent.com` → Audience: **Custom** → `sts.amazonaws.com` (exacto; si dejas *Everyone*, el `aud` del trust no coincidirá y el `AssumeRoleWithWebIdentity` falla). Next.
+2. Permissions: **Create policy** → pestaña **JSON** → pegar la policy `SubDeskCiDeployPolicy` (bloque C de abajo) → Review → name `SubDeskCiDeployPolicy`. Next.
+3. Role name: **`SubDeskCiDeployRole`** → Create role.
+4. Abrir el rol → pestaña **Trust relationships → Edit trust policy** → reemplazar TODO el documento por el JSON **A** de abajo. El `Condition` es el candado D-43/D-45: ata el rol a ESTE repo y a SU environment `dev`. Save changes.
+5. Copiar el **ARN del rol** (página del rol, arriba) → valor del secreto `AWS_ROLE_ARN` en el environment `dev` de GitHub.
+6. Regla de orden para el futuro: si el environment de GitHub se renombrara, **primero** se corrige el trust (paso 4) y **después** GitHub; el desmatch es fail-closed — deniega, nunca abre de más.
+
+### A) Trust policy (paso 4 — reemplazo completo; sub = environment real `dev`, D-45)
 
 ```json
 {
@@ -33,7 +42,7 @@ IAM → Roles → Create role → Trusted identity **Web identity** → provider
 
 La condición **atará el rol al environment `dev`**: ni otro repo, ni otro entorno, ni otro workflow pueden asumirlo. (Si en GitHub renombraras el environment, esto se rompe de forma segura: deniega, no afloja.)
 
-Policy inline `SubDeskCiDeployPolicy`, pegada al rol:
+### C) Policy inline `SubDeskCiDeployPolicy` (paso 2 — pegar tal cual, cuenta ya sustituida)
 
 ```json
 {
