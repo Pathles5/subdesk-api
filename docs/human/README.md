@@ -1,6 +1,6 @@
-# Documentación para humanos — índice
+﻿# Documentación para humanos — índice
 
-Actualizado: fase 01 · 2026-11-19
+Actualizado: fase 01 · 2026-11-20
 
 Este es el mapa vinculante de la documentación que **una persona** lee: para usar el sistema, para mantenerlo y para operarlo. El proceso SDD (specs, tasks, decisiones) vive en `docs/specs/**` y `docs/harness/**`; aquí no se duplica, se **explica**. Regla general: constitución **I8**.
 
@@ -10,15 +10,16 @@ Idioma: prosa en español. Rutas, campos JSON, `operationId`, comandos y nombres
 
 | Artefacto | Para quién | Qué contiene | Dueño | Nace en | Estado |
 |---|---|---|---|---|---|
-| `README.md` (raíz) | quien clona el repo | qué es (API — sin bot, D-37), estado por fases, comandos, variables, conexión del bot, límites | documentador (por orden) | v1 creada 2026-11-19 a petición del usuario (orquestador); se **completa en Fase 02** con comandos ejecutables reales | **creado v1 (Actualizado: fase 01 · 2026-11-19)** |
+| `README.md` (raíz) | quien clona el repo | qué es (API — sin bot, D-37), estado por fases, comandos, variables, conexión del bot, límites | documentador (por orden) | v1 creada 2026-11-19 a petición del usuario (orquestador); se **completa en Fase 02** con comandos ejecutables reales | **creado v1 (Actualizado: fase 01 · 2026-11-20)** |
 | `CHANGELOG.md` (raíz) | quien consume la API | cambios por versión: endpoints añadidos/modificados, rupturas, migraciones | documentador | Fase 02 | pendiente (Fase 02) |
 | `functional/product.md` | producto / agente del panel | flujos de uso: usuario escribe al bot → ticket → agente responde → llega al chat | documentador | Fase 09 | pendiente (Fase 09) |
-| `functional/api.md` | frontend del panel | los 4 endpoints en lenguaje humano: ejemplos reales de petición/respuesta, errores, auth, límites (30 s / 6 MB) | documentador | **Fase 01** | **creado (Actualizado: fase 01 · 2026-11-19)** |
-| `technical/architecture.md` | quien mantiene el código | topología real (Function URL → Express → services → repositories → DynamoDB), capas y reglas de dependencia, dónde entra cada cosa | documentador | **Fase 00** | **creado (Actualizado: fase 01 · 2026-11-19)** |
-| `technical/data-model.md` | quien mantiene el código | la tabla, el enum cerrado, capacidad provisioned 25/25 y su franquicia, consumo de RCU/WCU del `Scan`, cuándo migrar a `Query` | documentador | **Fase 01** | **creado (Actualizado: fase 01 · 2026-11-19)** |
+| `functional/api.md` | frontend del panel | los 4 endpoints en lenguaje humano: ejemplos reales de petición/respuesta, errores, auth, límites (30 s / 6 MB) | documentador | **Fase 01** | **creado (Actualizado: fase 01 · 2026-11-20)** |
+| `technical/architecture.md` | quien mantiene el código | topología real (Function URL → Express → services → repositories → DynamoDB), capas y reglas de dependencia, dónde entra cada cosa | documentador | **Fase 00** | **creado (Actualizado: fase 01 · 2026-11-20)** |
+| `technical/data-model.md` | quien mantiene el código | la tabla, el enum cerrado, capacidad provisioned 25/25 y su franquicia, consumo de RCU/WCU del `Scan`, cuándo migrar a `Query` | documentador | **Fase 01** | **creado (Actualizado: fase 01 · 2026-11-20)** |
 | `technical/operations.md` | quien opera | seguridad (x-api-key, secret token), logs (qué se registra y qué nunca), cold start, límites, IAM | documentador | Fase 02 | pendiente (Fase 02) |
+| `technical/bot-plan.md` | quien diseñe el bot (proyecto-hijo, fase futura 12) | reparto bot↔API, topología de dos Function URLs, protocolo (update-format, `update_id` sintéticos, ack encadenado), reglas del catálogo y aterrizaje | orquestador | **Fase 01+ (D-38)** | **creado (Actualizado: fase 01 · 2026-11-20)** |
 | `technical/decisions-summary.md` | cualquiera | resumen legible de `DECISIONS.md` con enlaces a las IDs (no lo reescribe) | documentador | Fase 09 | pendiente (Fase 09) |
-| `docs/api/openapi.yaml` | **contrato** machine-readable | OpenAPI 3.1 de los 4 endpoints: schemas, códigos, ejemplos, seguridad. **Propiedad del orquestador**: es contrato, no prosa | orquestador | **Fase 01** | **creado (Actualizado: fase 01 · 2026-11-19)** |
+| `docs/api/openapi.yaml` | **contrato** machine-readable | OpenAPI 3.1 de los 4 endpoints: schemas, códigos, ejemplos, seguridad. **Propiedad del orquestador**: es contrato, no prosa | orquestador | **Fase 01** | **creado (Actualizado: fase 01 · 2026-11-20)** |
 | `docs/api/api.html` | lector ocasional | documento navegable generado **en local** desde `openapi.yaml` (devDependency; sin CDN) | documentador | opcional | opcional |
 | `docs/human/diagrams/api-flow.mmd` (+ `.svg`) | todos | por endpoint: cliente → Function URL → router → middleware → service → repository/Telegram, con los caminos de error | documentador | Fase 04 | pendiente (Fase 04) |
 | `docs/human/diagrams/deployment.mmd` (+ `.svg`) | todos | repo → GitHub Actions → SAM/CloudFormation → recursos AWS (región única, 1 Lambda, 1 tabla, 1 URL) | documentador | Fase 03 | pendiente (Fase 03) |

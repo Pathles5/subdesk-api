@@ -1,6 +1,6 @@
-# Arquitectura técnica — SubDesk API
+﻿# Arquitectura técnica — SubDesk API
 
-Actualizado: fase 01 · 2026-11-19
+Actualizado: fase 01 · 2026-11-20
 
 > Documento para quien va a mantener el código. Las decisiones con su historia están en `DECISIONS.md` (se enlazan por ID); los criterios por fase están en `docs/specs/`. El contrato de la API se publica en `docs/api/openapi.yaml` (nace en Fase 01).
 
@@ -108,4 +108,4 @@ Siete variables, todas a través de `src/config.js` (nunca `process.env` suelto 
 - **Fase 03:** rol IAM exacto de menor privilegio (**D-24**, el gate cfn-lint ya lo fijó D-31); spike de empaquetado con pnpm árbol plano (**D-31**).
 - **Fase 08:** estrategia de CI/CD, secretos y momento del `setWebhook` (**D-25**).
 - **Futura:** migración a `PAY_PER_REQUEST` (**D-29**, exige OK explícito del usuario).
-- Estado del registro: entradas **registradas** = D-01–D-22, D-26, D-27, D-30–D-37; **solo filas de pendientes** (sin entrada todavía) = D-23, D-24, D-25, D-28, D-29; decisión **vía de escape** futura con OK obligatorio = D-29. Próximo ID libre: **D-38** (la tabla de `DECISIONS.md` es la fuente).
+- Estado del registro: entradas **registradas** = D-01–D-22, D-26, D-27, D-30–D-38; **solo filas de pendientes** (sin entrada todavía) = D-23, D-24, D-25, D-28, D-29; decisión **vía de escape** futura con OK obligatorio = D-29. Próximo ID libre: **D-39** (la tabla de `DECISIONS.md` es la fuente).

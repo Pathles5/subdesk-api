@@ -1,6 +1,6 @@
-# SubDesk API
+﻿# SubDesk API
 
-Actualizado: fase 01 · 2026-11-19
+Actualizado: fase 01 · 2026-11-20
 
 > **Qué es:** una **API backend** de gestión de tickets, serverless en AWS, con coste previsto $0 (invariante I2). Recibe mensajes vía webhook, los guarda como tickets en DynamoDB y expone una REST API para un panel de atención.
 >
@@ -111,6 +111,7 @@ Nada más: ni SDKs ni librerías de bot en este repo. Los reintentos, los format
 | los endpoints sin jerga AWS (mi panel los va a llamar) | `docs/human/functional/api.md` |
 | el contrato exacto (schemas, códigos, ejemplos) | `docs/api/openapi.yaml` |
 | la tabla y por qué el `id` deduplica sin índices | `docs/human/technical/data-model.md` |
+| cómo encajará el bot (proyecto-hijo: botones, suscripciones, catálogo) | `docs/human/technical/bot-plan.md` (D-38) |
 | la topología y las reglas de capas | `docs/human/technical/architecture.md` |
 | las reglas inquebrantables (coste $0, secretos, CORS, ack) | `docs/specs/constitution.md` |
 | en qué está el proyecto y qué queda | `docs/specs/INDEX.md` |
