@@ -55,7 +55,7 @@ Que AWS solo se toque desde GitHub Actions, para siempre:
 ## 5. Decisiones de seguridad de la pipeline (vinculantes)
 
 1. El rol OIDC `SubDeskCiDeployRole` lleva la **condición** `repo:Pathles5/subdesk-api:environment:Production` en el trust (no `ref` suelto) — sin entorno aprobado, no hay credenciales.
-2. Sus permisos: exactos del §5 de la spec (CloudFormation stack `subdesk-api*`, IAM con `PathPrefix=/subdesk-api/` + PassRole solo al rol de la app, S3 al bucket SAM, Lambda/Table/Logs al prefijo del stack). Cero `Resource: "*"` en el propio rol de CI (lo audita `check.ps1` leyendo el JSON publicado en este repo).
+2. Sus permisos: exactos del §5 de la spec (CloudFormation stack `subdesk-api*`, IAM con `PathPrefix=/subdesk-api/` + PassRole solo al rol de la app, S3 al bucket SAM, Lambda/Table/Logs al prefijo del stack). Cero `Resource: "*"` en el propio rol de CI (lo audita `check.ps1` leyendo el JSON publicado en este repo; **el JSON definitivo y auditado está en `docs/specs/04-pipeline/bootstrap-oidc.md` §2** — prefijos `subdesk-api-dev-*` por ser el nombre de stack resuelto en D-25; PassRole además condicionado a `PassedToService=lambda`).
 3. Ningún workflow usa `AWS_ACCESS_KEY_ID`/`AWS_SECRET_ACCESS_KEY` (assert en `check.ps1`: grep de esos nombres en `.github/**` fuera de `configure-aws-credentials@v4` con `role-to-assume`).
 4. Los secretos de la app viven solo en el environment `Production`; `echo::none` en el log del deploy.
 5. Dependabot: **no** en esta fase (superficie nueva; se propone con decisión en F09).
