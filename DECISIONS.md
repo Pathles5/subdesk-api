@@ -287,6 +287,14 @@ Formato: ID · fecha · contexto · opciones · elección · motivo · riesgo.
 - **Motivo:** `node:test` es nativo del runtime (cero dependencias, coherente con la superficie mínima de I4b/D-30) y el patrón de inyección hace que "simular DynamoDB" y "simular Telegram" sean un argumento más de `createApp()`, no una capa de magic. La verificación incremental del contrato por endpoint impide que la Fase 02 prometa códigos de estado que todavía no existen: el stub `501` es andamiaje, no contrato.
 - **Riesgo:** `node:test` no mide cobertura y no hay umbral fijado (se decide, si se quiere, en Fase 09); los tests de contrato de superficie no detectan un schema mal serializado en un handler real — por eso el test se amplía con cada endpoint en su fase. Las dos superficies simuladas (repositorio, `fetch`) se alejan del comportamiento real de AWS/Telegram: el E2E de Fase 08, con visto del usuario, es el que cierra ese hueco.
 
+## D-39 · 2026-11-20 · `TG_UPDATE_NS` se congela en Fase 04 (primer consumidor real), no en Fase 02 `supersedes` las menciones «Fase 02» del plan heredado (D-35/D-23)
+
+- **Contexto:** la revisión fresh-eyes de Fase 02 (desv. 2) detectó que `data-model.md`, `api.md` y el contrato decían «la constante de namespace `TG_UPDATE_NS` se fija en Fase 02», pero el scaffold entregado no contiene `src/utils/ids.js` porque **nadie calcula aún un `id`** (los cuatro endpoints son stubs 501): fijar la constante hoy sería escribir código muerto que ningún test ejerce, en contra de la regla de no crear nada vacío (I8a) y del principio YAGNI (I1).
+- **Opciones:** (a) crear `utils/ids.js` en Fase 02 sin consumidor (código no ejercitado); (b) **trasladar la congelación a Fase 04** (ingesta: el punto donde el primer `update_id` real se convierte en `id` y donde el test de dedupe puede ejercitarlo); (c) eliminar la deuda (imposible: el dedupe la necesita).
+- **Elección:** (b). En Fase 04: `src/utils/ids.js` nace con `TG_UPDATE_NS` (UUID v5, RFC 4122 appendix), su test de determinismo, y la regeneración de los ejemplos de `id`/cursor del contrato y docs (cierre de la nota D-35). Las tres menciones prose «Fase 02» se reescribieron a «Fase 04» (prosa de contrato incluida, precedente D-37: sin tocar formas).
+- **Motivo:** una constante de deduplicación histórica solo es verificable junto a su consumidor; y la deuda queda registrada en el sitio donde se paga (fila 02 de `INDEX.md` como origen, spec de Fase 04 como destino).
+- **Riesgo:** ninguno nuevo: la fecha de congelación se mueve dentro del mismo plan; el valor, una vez fijado en 04, es inmutable por enmienda igual que antes.
+
 ---
 
 # Pendientes de decisión (se resuelven en su fase, con IDs siguientes)
@@ -314,4 +322,5 @@ Formato: ID · fecha · contexto · opciones · elección · motivo · riesgo.
 | D-36 | Literalidad I5 «siempre 2xx» vs la excepción 403 de D-21 | 01 | resuelta: **D-36**, enmienda de literalidad a I5 con OK del usuario 2026-11-19 (no cambia conducta, solo la norma escrito lo ya decidido) |
 | D-37 | Alcance explícito API-vs-bot (petición del usuario) | 01+ | resuelta: **D-37**, enmienda explicativa de I1 + aclaraciones en contrato/docs + README raíz (2026-11-19). El bot será trabajo **aparte** de este repo |
 | D-38 | Arquitectura del bot: ¿dentro de la API o proyecto-hijo? | — | resuelta: **D-38** (2026-11-20): proyecto-hijo `subdesk-bot` (Lambda stateless + Function URL, misma cuenta, $0), protocolo update-Telegram-format con `update_id` sintéticos ≥10¹⁵ y ack encadenado; diseño en `docs/human/technical/bot-plan.md`. Su desarrollo es trabajo de **ese** repo (fase futura 12) |
-| D-39 → | Próximas decisiones que nazcan en cualquier fase | — | reservado a partir de **D-39** |
+| D-39 | Congelación de `TG_UPDATE_NS` (Fase 02 → Fase 04) | 02 | resuelta: **D-39** (2026-11-20); la deuda viaja anotada a la spec de Fase 04 (con su test de determinismo y regeneración de ejemplos) |
+| D-40 → | Próximas decisiones que nazcan en cualquier fase | — | reservado a partir de **D-40** |

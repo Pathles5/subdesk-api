@@ -159,6 +159,14 @@ if (Test-Path $pkgPath) {
         if ($pkg.type -ne "module") { Add-Note "package.json is not ESM ('type' != 'module'); confirm against phase 00 decision." }
         else { Add-Note "ESM project (type: module) as required by the brief." }
 
+        # engines.node is mandatory once package.json exists (I7, closing phase-00 debt in phase 02 A-03).
+        $engNode = "$($pkg.engines.node)"
+        if ($engNode -notmatch "\d") {
+            Add-Fail "package.json engines.node missing: the Node contract (I7 / D-28) must be pinned in the manifest."
+        } else {
+            Add-Note "engines.node pinned: $engNode."
+        }
+
         # pnpm is the only allowed package manager (I4b).
         $pm = "$($pkg.packageManager)"
         if ($pm -notmatch '^pnpm@\d+\.\d+\.\d+$') {
@@ -179,7 +187,7 @@ if (Test-Path $pkgPath) {
             Add-Fail "Missing pnpm-workspace.yaml: supply-chain settings (ignoreScripts, strictDepBuilds) must live there (I4b)."
         } else {
             $ws = Get-Content $wsPath -Raw -Encoding UTF8
-            foreach ($setting in @("ignoreScripts", "strictDepBuilds", "allowBuilds", "minimumReleaseAge", "trustPolicy", "blockExoticSubdeps")) {
+            foreach ($setting in @("ignoreScripts", "strictDepBuilds", "allowBuilds", "minimumReleaseAge", "trustPolicy", "blockExoticSubdeps", "verifyStoreIntegrity", "verifyDepsBeforeRun", "enablePrePostScripts")) {
                 if ($ws -notmatch "(?m)^\s*$setting\s*:") {
                     Add-Fail "pnpm-workspace.yaml lacks '$setting' (I4b / D-30)."
                 }
@@ -190,7 +198,13 @@ if (Test-Path $pkgPath) {
             foreach ($entry in ([regex]::Matches($ws, '(?mi)^\s*allowBuilds\s*:([\s\S]*?)(\r?\n\S|\z)'))) {
                 $body = $entry.Groups[1].Value
                 $listed = ([regex]::Matches($body, '(?m)^\s*-\s*["'']?([A-Za-z0-9@/_.-]+)')).Count
-                if ($listed -gt 0) { Add-Note "allowBuilds lists $listed approved dependency build script(s): verify each has a DECISIONS.md entry (I4b)." }
+                if ($listed -gt 0) { Add-Fail "allowBuilds lists $listed dependency build script(s): each requires a registered DECISIONS.md entry AND explicit user OK (I4b / D-30). Reviewer-only checks are not enough (phase-00 debt closed in A-03)." }
+            }
+            if ($ws -match "(?mi)^\s*allowBuilds\s*:\s*\[\s*[^\]\s]") {
+                Add-Fail "allowBuilds is non-empty (inline form): each entry requires a registered DECISIONS.md entry AND explicit user OK (I4b / D-30)."
+            }
+            if ($ws -match "(?mi)^\s*patchedDependencies\s*:\s*(?!\s*$)\S") {
+                Add-Fail "patchedDependencies declared in pnpm-workspace.yaml: patches alter dependency code and require a registered decision + explicit user OK (I4b / D-30)."
             }
             if ($ws -match "(?i)^\s*pnpmfile\s*:") { Add-Fail "pnpmfile declared: it can execute code during resolution; requires a registered decision (I4b)." }
         }

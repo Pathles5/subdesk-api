@@ -1,4 +1,4 @@
-﻿# SubDesk API
+# SubDesk API
 
 Actualizado: fase 02 · 2026-11-20
 
@@ -53,7 +53,8 @@ docs/
     technical/architecture.md  topología y capas reales
     technical/data-model.md    la tabla, el id determinista, costes por operación
 scripts/check.ps1              compuerta mecánica (docs, higiene de secretos, asserts IaC)
-src/ tests/ template.yaml      nacen en Fases 02–03 (todavía no existen, a propósito)
+src/ tests/                scaffold vivo desde Fase 02 (capas + seguridad + tests; stubs 501)
+template.yaml              nace en Fase 03
 ```
 
 ## Comandos
@@ -124,4 +125,4 @@ Nada más: ni SDKs ni librerías de bot en este repo. Los reintentos, los format
 
 ## Aviso de proceso
 
-Este repo se construye con un ciclo Spec-Driven (spec → tasks → tu visto por tarea → implementación → compuertas → revisión fresh-eyes → decisión registrada). Si llegas buscando el código: está **planificado para empezar en la Fase 02**; hoy existen la arquitectura, el modelo de datos y los contratos, todos verificados por `scripts/check.ps1`.
+Este repo se construye con un ciclo Spec-Driven (spec → tasks → tu visto por tarea → implementación → compuertas → revisión fresh-eyes → decisión registrada). Si llegas buscando el código: el **scaffold ya existe** (Fase 02: capas, middleware de seguridad completo, tests y contrato superficie en verde); los endpoints se llenan en las Fases 04–07 y la infraestructura en la 03. Todo verificado por `pnpm test`, `pnpm run lint`, `pnpm run validate:api` y `scripts/check.ps1`.

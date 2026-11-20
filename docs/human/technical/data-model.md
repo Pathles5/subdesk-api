@@ -1,4 +1,4 @@
-﻿# Modelo de datos — `TicketsTable`
+# Modelo de datos — `TicketsTable`
 
 Actualizado: fase 02 · 2026-11-20
 
@@ -33,7 +33,7 @@ id = uuidv5(TG_UPDATE_NS, "tg:" + update_id)
 - **UUID v5** (nombre-space + SHA-1), no v4: el mismo `update_id` produce **siempre** el mismo `id`, sea cual sea el proceso o el momento que lo reciba. Implementación en `utils/ids.js` con `crypto.createHash('sha1')` (~25 líneas, cero dependencias — I4b), sin paquete `uuid`.
 - **Alta = un `PutItem` con condición** `attribute_not_exists(id)`. Si la condición falla, es que el update ya estaba: se responde `200 { "ignored": "duplicate" }` sin escribir nada. Cero lecturas extra, exactitud garantizada, sin carrera entre reintentos concurrentes (si dos llegan a la vez, uno gana y el otro cae en `duplicate`: exactamente lo deseado).
 - **Por qué así (D-19):** la alternativa era un `id` v4 aleatorio + buscar el duplicado antes de escribir — con una sola tabla y sin índices eso obliga a `Scan`, caro y aproximado (carreras) — o una segunda tabla de deduplicación, prohibida por I2. Es el problema caro de la fase, resuelto con una escritura.
-- **La constante de namespace `TG_UPDATE_NS` se fija en Fase 02** en `utils/ids.js` y se documenta (y congela) en este documento. Cambiarla en el futuro rompería la correspondencia `update_id → id` histórica: los reintentos viejos dejarían de deduplicarse. Por eso **modificarla exige enmienda** a la spec de Fase 01 + `DECISIONS.md`, no un refactor.
+- **La constante de namespace `TG_UPDATE_NS` se congela en la Fase 04** (ingesta), en `src/utils/ids.js` — el momento en que existe su primer consumidor; en Fase 02 no se fijó porque el scaffold no calcula todavía ningún `id` (decisión registrada como D-39; antes este párrafo decía «Fase 02»). Queda documentada (y congelada) en este documento al fijarse. Cambiarla en el futuro rompería la correspondencia `update_id → id` histórica: los reintentos viejos dejarían de deduplicarse. Por eso **modificarla exige enmienda** a la spec de Fase 01 + `DECISIONS.md`, no un refactor. Regenerar entonces los ejemplos de `id`/cursor (D-35).
 - Desviación deliberada anotada en la spec (§9.1): el brief hablaba de "UUID v4". Un `id` v4 impediría la deduplicación exacta sin índices; es reversible solo con un GSI, que I2 no autoriza hasta la fase 10.
 
 ## Estados y transiciones (spec §4.3)

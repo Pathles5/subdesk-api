@@ -1,4 +1,4 @@
-﻿# API en lenguaje humano — los 4 endpoints de SubDesk
+# API en lenguaje humano — los 4 endpoints de SubDesk
 
 Actualizado: fase 02 · 2026-11-20
 
@@ -106,7 +106,7 @@ Tres cosas que conviene saber:
 
 - **`username` y `response_text` pueden faltar** en el JSON: el primero si el usuario de Telegram no tiene nombre de usuario ni nombre propio; el segundo hasta que alguien responde el ticket. El resto de campos están siempre.
 - **El cursor es opaco**: es un secreto interno de paginación del almacén. No lo parses, no lo generes tú, no asumas nada de su contenido; solo reenvíalo tal cual en `cursor` para pedir la siguiente página, y `next_cursor: null` significa fin de la cola.
-- **El `id` de los ejemplos es ilustrativo**: no es el UUID v5 real de ningún `update_id` (el namespace `TG_UPDATE_NS` se congela en Fase 02 y entonces se regeneran los ejemplos, D-35). Para tu panel es simplemente una cadena opaca que no cambias tú.
+- **El `id` de los ejemplos es ilustrativo**: no es el UUID v5 real de ningún `update_id` (el namespace `TG_UPDATE_NS` se congela en la Fase 04 con la ingesta, D-39, y entonces se regeneran los ejemplos, D-35). Para tu panel es simplemente una cadena opaca que no cambias tú.
 - **Nota de honestidad sobre el orden:** `created_at` descendente está garantizado *dentro de cada página*. Mientras la cola esté en el volumen objetivo (hasta unos 1.000–2.000 tickets), una sola página cubre todo y el matiz no se nota. Si el volumen crece, el orden entre páginas puede no ser estricto; la respuesta prevista es una mejora interna del servidor (migrar a índice y `Query`, fase futura), **no** un cambio de contrato. Tu panel puede tratar `next_cursor` como única forma de avanzar.
 
 Respuestas: `200`, `400` (filtros inválidos), `401` (falta `x-api-key`), `403` (clave incorrecta).

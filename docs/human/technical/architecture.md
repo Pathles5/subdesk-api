@@ -1,4 +1,4 @@
-﻿# Arquitectura técnica — SubDesk API
+# Arquitectura técnica — SubDesk API
 
 Actualizado: fase 02 · 2026-11-20
 
@@ -22,7 +22,7 @@ Volumen previsto: bajo (una persona y sus agentes). Todas las decisiones optimiz
 ```
 Telegram ──POST──▶ ┌─────────────────────────────┐
                    │  Lambda Function URL (NONE) │  ← único endpoint público; sin cargo por petición
-Panel ──x-api-key─▶│  1× Lambda · Node.js 20 ESM │  ← 256 MB, 30 s máx de invocación HTTP
+Panel ──x-api-key─▶│  1× Lambda · Node ≥20 ESM │  ← 256 MB, 30 s máx de invocación HTTP (runtime exacto: Fase 03)
                    │  Express app (router interno)│
                    └───────┬─────────────┬───────┘
                            │             │
