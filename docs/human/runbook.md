@@ -66,7 +66,7 @@ La evidencia (cero symlinks/junctions y tamaño del zip frente al límite de 50 
 
 ## 2. Despliegue real — **Fase 04, vía pipeline** (D-42; propuesta documentada; no ejecutada)
 
-Nada de este bloque se ha corrido. Con el reorder pipelines-first (**D-42**) entra en vigor en la **Fase 04** y su ejecutor es `deploy.yml` en GitHub Actions — nunca un comando tecleado en local; el visto del usuario se materializa como **aprobación del entorno `Production`** (D-43/OIDC). La estrategia de CI/CD sigue siendo la fila **D-25** (se resuelve en esa fase); el `setWebhook` real se movió a la **Fase 09**.
+Nada de este bloque se ha corrido. Con el reorder pipelines-first (**D-42**) entra en vigor en la **Fase 04** y su ejecutor es `deploy.yml` en GitHub Actions — nunca un comando tecleado en local; el visto del usuario se materializa como **aprobación del entorno `dev`** (D-43/OIDC). La estrategia de CI/CD sigue siendo la fila **D-25** (se resuelve en esa fase); el `setWebhook` real se movió a la **Fase 09**.
 
 Los secretos viajan **solo como nombres de variables de GitHub Actions** — nunca con su valor en un archivo del repo ni en la salida del log (I4/D-17). Cada nombre de la izquierda es el `Parameter` del `template.yaml` (con `NoEcho: true`); el de la derecha, el secreto de GitHub:
 
@@ -100,9 +100,9 @@ sam deploy --template-file packaged.yaml --stack-name <NOMBRE_DEL_STACK> --regio
 
 1. **Provider OIDC en AWS** — IAM → Identity providers → OIDC: URL `https://token.actions.githubusercontent.com`, audience `sts.amazonaws.com`.
    Verificación: el ARN existe (`arn:aws:iam::<ACCOUNT_ID>:oidc-provider/token.actions.githubusercontent.com`). ✔ **Hecho en el dev el 2026-11-20** (ver D) ).
-2. **Rol `SubDeskCiDeployRole`** — trust = provider anterior **con la condición** `repo:<ORG>/<REPO>:environment:Production` (la línea exacta en bootstrap §2; es lo que hace que *solo* el environment aprobado del repo indicado pueda asumir el rol). Adjuntar la inline policy `SubDeskCiDeployPolicy` (bootstrap §2): prefijos `subdesk-api-dev-*` en CloudFormation/IAM/DynamoDB/Logs, Lambda por nombre fijo, bucket SAM gestionado, `iam:PassRole` solo a `lambda.amazonaws.com`. Sin `Resource:"*"` (salvo `sts:GetCallerIdentity`, inerte).
+2. **Rol `SubDeskCiDeployRole`** — trust = provider anterior **con la condición** `repo:<ORG>/<REPO>:environment:dev` (la línea exacta en bootstrap §2; es lo que hace que *solo* el environment aprobado del repo indicado pueda asumir el rol). Adjuntar la inline policy `SubDeskCiDeployPolicy` (bootstrap §2): prefijos `subdesk-api-dev-*` en CloudFormation/IAM/DynamoDB/Logs, Lambda por nombre fijo, bucket SAM gestionado, `iam:PassRole` solo a `lambda.amazonaws.com`. Sin `Resource:"*"` (salvo `sts:GetCallerIdentity`, inerte).
 3. **Alerta de facturación $0** — Billing → Budgets → alerta de gasto mensual con umbral 0 y email. **Antes** del primer deploy (es el detector que I2 exige; no es accionable por IaC: vivir en Billing es su gracia y su límite).
-4. **Environment `Production` en GitHub** — Settings → Environments: nombre `Production`, **Required reviewers = el humano que da el visto** (este mecanismo ES "I6 ejecutable": ningún deploy corre sin su click en Actions), y los 6 valores de C).
+4. **Environment `dev` en GitHub** — Settings → Environments: nombre `dev`, **Required reviewers = el humano que da el visto** (este mecanismo ES "I6 ejecutable": ningún deploy corre sin su click en Actions), y los 6 valores de C).
 
 ### B) Matriz de secretos — qué es cada uno, cómo se genera, dónde se consume
 
@@ -128,7 +128,7 @@ Sustituir en este orden y verificar: (1) `ACCOUNT_ID` (todos los ARNs) · (2) `P
 | Account ID | `159177056493` | facilitado por el usuario 2026-11-20 (identificador, no credencial) |
 | Provider OIDC | `arn:aws:iam::159177056493:oidc-provider/token.actions.githubusercontent.com` | ✔ creado (reporte del usuario 2026-11-20) |
 | Rol `SubDeskCiDeployRole` | `arn:aws:iam::159177056493:role/SubDeskCiDeployRole` (esperado; pegar el real) | ⏳ paso 2 |
-| GitHub environment `Production` | — | ⏳ paso 4 |
+| GitHub environment `dev` | — | ⏳ paso 4 |
 | Alerta $0 | — | ⏳ paso 3 |
 
 ## 3. Dónde se leen los outputs

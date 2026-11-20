@@ -23,7 +23,7 @@ IAM → Roles → Create role → Trusted identity **Web identity** → provider
       "Condition": {
         "StringEquals": {
           "token.actions.githubusercontent.com:aud": "sts.amazonaws.com",
-          "token.actions.githubusercontent.com:sub": "repo:Pathles5/subdesk-api:environment:Production"
+          "token.actions.githubusercontent.com:sub": "repo:Pathles5/subdesk-api:environment:dev"
         }
       }
     }
@@ -31,7 +31,7 @@ IAM → Roles → Create role → Trusted identity **Web identity** → provider
 }
 ```
 
-La condición **atará el rol al environment `Production`**: ni otro repo, ni otro entorno, ni otro workflow pueden asumirlo. (Si en GitHub renombraras el environment, esto se rompe de forma segura: deniega, no afloja.)
+La condición **atará el rol al environment `dev`**: ni otro repo, ni otro entorno, ni otro workflow pueden asumirlo. (Si en GitHub renombraras el environment, esto se rompe de forma segura: deniega, no afloja.)
 
 Policy inline `SubDeskCiDeployPolicy`, pegada al rol:
 
@@ -60,9 +60,9 @@ Copia el **ARN del rol**: `arn:aws:iam::159177056493:role/SubDeskCiDeployRole` �
 
 Console → Billing → Budgets → Alerts → Create: Monthly cost, actual spend, **threshold 0 USD**, email a tu correo. (Sin SNS si solo quieres email; esto no se puede crear por IaC sin superficie nueva — así está decidido.)
 
-## 4. GitHub — Environment `Production`
+## 4. GitHub — Environment `dev`
 
-Repo → Settings → Environments → **New environment**: `Production`.
+Repo → Settings → Environments → **New environment**: `dev`.
 - **Required reviewers**: tú mismo (esto ES el visto I6 auditable de cada deploy).
 - **Secrets** (6): `TELEGRAM_BOT_TOKEN` (el de tu bot de prueba de @BotFather), `ADMIN_API_KEY` (genéralo tú, p. ej. `node -e "console.log(require('crypto').randomUUID())"` — ≥16 chars por AllowedPattern), `TELEGRAM_WEBHOOK_SECRET` (igual, otro random), `AWS_159177056493`, `AWS_REGION` (puede ser *variable*, no secreto: `us-east-1`), `AWS_ROLE_ARN` (el ARN del paso 2).
 
@@ -73,7 +73,7 @@ Repo → Settings → Environments → **New environment**: `Production`.
 ## 6. Verificación por lectura (la hace el orquestador, con tu visto para CLI o por pantallazo)
 
 - Rol: trust con condición exacta + policy sin `Resource: "*"` (salvo `sts:GetCallerIdentity`, inerte).
-- Provider: sub claim apunta a `environment:Production`.
+- Provider: sub claim apunta a `environment:dev`.
 - GitHub: environment con reviewer = usuario; secretos presentes por NOMBRE (nunca valores).
 
 ## 7. Estado del bootstrap dev (se rellena al ejecutar; spec de valores NO secrets en `docs/human/runbook.md` §2.7-D)
@@ -83,7 +83,7 @@ Repo → Settings → Environments → **New environment**: `Production`.
 | 1. Provider OIDC | ✔ creado el 2026-11-20 — `arn:aws:iam::159177056493:oidc-provider/token.actions.githubusercontent.com` |
 | 2. Rol `SubDeskCiDeployRole` (con `159177056493=159177056493` sustituido ya en los JSON de arriba) | ⏳ |
 | 3. Alerta $0 | ⏳ |
-| 4. Environment `Production` + 6 secretos | ⏳ |
+| 4. Environment `dev` + secretos | ⏳ |
 | 5. Bot de prueba (@BotFather) | ⏳ |
 
 Cuando el paso 1–4 esté hecho, dime "bootstrap listo" y el orquestador: (a) verifica por lectura, (b) despacha T-04/T-05/T-06 (workflows + scripts + asserts), (c) te propone el push del workflow y el primer deploy lo apruebas tú **en la pestaña Actions** del PR/merge. Nada más toca AWS desde esta máquina: ni ahora ni después.
