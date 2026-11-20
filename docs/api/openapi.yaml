@@ -5,7 +5,7 @@
 # la instalación de la devDep con versión exacta ocurre en Fase 02 — antes de eso, este archivo se valida a mano).
 # Diagramas: los .mmd/.svg del flujo por endpoint (api-flow) se crean en Fase 04, cuando exista la
 # implementación que representan (I8: nada vacío ni por adelantado); la exportación local es `pnpm run docs:diagrams` (@mermaid-js/mermaid-cli, D-33).
-# Actualizado: fase 02 · 2026-11-20
+# Actualizado: fase 03 · 2026-11-20
 openapi: 3.1.0
 info:
   title: SubDesk API

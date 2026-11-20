@@ -24,7 +24,7 @@ pnpm run check                   # scripts/check.ps1 → asserts de IaC + frescu
 | 1 sola Lambda con **1 sola** Function URL (`AWS::Lambda::Url`); ausencia de `AWS::ApiGatewayV2::*` y de `AWS::Serverless::HttpApi` | D-27 |
 | `MemorySize` ≤ 256 y **sin** provisioned concurrency (`AutoPublishAlias`/`ProvisionedConcurrencyConfig`) | I2 |
 | Ningún `"Resource": "*"` ni `arn:aws:iam::*` en la policy del rol | I4 / D-24 |
-| **Región única**: cualquier literal de región que aparezca debe ser `us-east-1` (assert nuevo en Fase 03). La plantilla no declara región: la fija el `--region us-east-1` de los comandos de §2 y §3 | I2 / D-26 |
+| **Región única**: guard de *literales* — cualquier token con forma de región (comentarios incluidos) debe ser `us-east-1`; no «fija» la región (la plantilla no declara propiedad de región: la fijan `--region us-east-1` en los comandos de §2/§3 y las lecturas de §5). Puede dar falso positivo si un comentario cita otra región (assert nuevo en Fase 03) | I2 / D-26 |
 | Los tres `Parameters` (`TelegramBotTokenParam`, `AdminApiKeyParam`, `WebhookSecretParam`) con `NoEcho: true`, `AllowedPattern` de forma y ningún valor literal en el archivo | I4 / D-17 (criterio C5 de la fase) |
 
 La topología es la de siempre —tabla, función, rol, grupo de logs y URL—, pero la URL está declarada como recurso **nativo** de CloudFormation (`AWS::Lambda::Url`) acompañada de su `AWS::Lambda::Permission` de invocación, que `AuthType: NONE` necesita; el permiso va declarado en la plantilla, explícito y auditable, en lugar de inyectado por el transform SAM. No añade superficie: apunta al ARN de la única función y no admite `Condition`.
@@ -50,7 +50,19 @@ pnpm install --frozen-lockfile --prod --config.nodeLinker=hoisted
 Get-ChildItem node_modules -Recurse -Attributes ReparsePoint | Measure-Object   # esperado: 0
 ```
 
-La evidencia (cero symlinks/junctions y tamaño del zip frente al límite de 50 MB directo) se registra en `docs/specs/03-iac/tasks.md` T-06 y cierra la fila D-31 de `DECISIONS.md`. El empaquetado real no usa `sam build` (D-31): `CodeUri` apunta al árbol que produce pnpm, y el CI de Fase 08 instala con `pnpm install --prod` para que las devDependencies no viajen al artefacto.
+La evidencia (cero symlinks/junctions y tamaño del zip frente al límite de 50 MB directo) se registra en `docs/specs/03-iac/tasks.md` T-06 y cierra la fila D-31 de `DECISIONS.md`. El empaquetado real **no usa `sam build`** (D-31): `CodeUri: ./` apunta al árbol del repo — y aquí vive un hazard documentado en §2.5 abajo (`.gitignore` + el filtrado de `sam package`).
+
+### 2.5 Hazard del empaquetado — precondición del pipeline de Fase 08 (corrección D3, revisión fresh-eyes 2026-11-20)
+
+`sam package`/`sam deploy` aplican las reglas de **`.gitignore`** al comprimir el `CodeUri`. Como `.gitignore` contiene `node_modules/`, la receta ingenua puede producir un ZIP **sin dependencias** (la Lambda arrancaría con `ERR_MODULE_NOT_FOUND: express`) — o, al revés, sin filtrado, llevarse devDeps y `.bin` dentro. Regla determinista para F08 (ninguna se ejecuta hoy):
+
+1. **Staging explícito**: preparar `dist/lambda/` con `src/`, `package.json` y el `node_modules` **plano de producción** (`pnpm install --prod --frozen-lockfile --config.nodeLinker=hoisted` en dir limpio, copiado después) — nada de symlinks (spike D-31).
+2. **`.samignore`** en la raíz (fichero por defecto: los ignores de git; contenido explícito: incluir `node_modules`, excluir `dist/`, `tests/`, `docs/`, `.env*`, `*.md`) **o** `CodeUri` apuntando al staging con el mismo `.samignore`. La elección exacta se propone con el workflow (D-25) y su visto.
+3. **Verificación antes del deploy** (obligatoria, solo lectura): listar el ZIP generado y comprobar (a) presencia de `node_modules/express` y `serverless-http`, (b) ausencia de devDeps/`.bin`/`.env`, (c) tamaño coherente con la spike (~1 MB). Sin ese check, no se propone el deploy.
+
+### 2.6 Colisión del nombre físico (riesgo D4 anotado aquí y en spec §8)
+
+`FunctionName: TicketApiFunction` está fijado a propósito (determinismo del log group y del ARN literal del rol, §3). Consecuencias que el operador debe conocer: (a) un **segundo stack** en la misma cuenta+región que reutilice esta plantilla **colisiona** — el repo-hijo del bot (D-38) debe usar nombres propios; (b) un `sam delete` interrumpido puede dejar la función o el log group huérfanos y hacer fallar el recreate (mitigación: `get-function`/`list-functions` de solo lectura antes de recrear, y borrar el stack completo en vez de recursos sueltos); (c) si esto molestara en F08, la alternativa limpia es `!Sub "${AWS::StackName}-TicketApiFunction"` reconstruyendo igual el ARN de logs — enmienda registrada entonces, con visto.
 
 ## 2. Despliegue real — **Fase 08** (propuesta documentada; no ejecutada)
 
@@ -115,6 +127,7 @@ aws lambda remove-permission --function-name <NOMBRE_DE_LA_FUNCION> \
 
 Notas operativas:
 
+- El `statement-id` real de la política sale de la lectura `aws lambda get-policy` (CFN lo genera al no fijarse `StatementId` en la plantilla; en F08 puede fijarse `TicketApiUrlInvoke` explícito como cambio de plantilla con visto). La limpieza de §4 se hace SIEMPRE contra el id leído, nunca adivinándolo.
 - **Borrando el stack completo no queda residuo**: la URL y su política pertenecen al stack y se eliminan con él. El problema aparece al quitar solo el recurso `UrlConfig`, al importar recursos a mano o al recrear la función con el mismo nombre.
 - El grupo de logs es recurso **explícito** de la plantilla con `RetentionInDays: 30` (spec §4.1) — por eso la función no necesita `logs:CreateLogGroup` (D-24) y no deja grupo sin retención tras el borrado.
 - La tabla `TicketsTable` **sí** se borra con el stack: si contiene tickets reales, exportar/confirmar antes de cualquier `sam delete` o `DeleteStack`. Ningún borrado de tabla forma parte de una compuerta (D-12).

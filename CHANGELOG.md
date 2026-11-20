@@ -1,8 +1,18 @@
 # CHANGELOG — SubDesk API
 
-Actualizado: fase 02 · 2026-11-20
+Actualizado: fase 03 · 2026-11-20
 
 Cambios por versión, la más nueva primero. Aquí se cuenta **lo que nota una persona**: endpoints que empiezan a responder, comandos que aparecen, variables nuevas, rupturas y migraciones. El contrato vinculante es `docs/api/openapi.yaml`; el proceso interno vive en `docs/specs/**` y `DECISIONS.md`.
+
+## 0.1.0 — Fase 03: infraestructura como código, validada en seco (2026-11-20)
+
+Sin endpoints nuevos todavía (los stubs `501` siguen esperando a las Fases 04–07) y **sin ningún recurso real creado** — todo estático, con el despliegue pendiente de tu visto (I6). Lo que cambia para quien mira el repo:
+
+- **`template.yaml`** (SAM, D-15): la topología $0 completa declarada como código y validada con `cfn-lint` exit 0 sin credenciales ni supresiones — 1 tabla `PROVISIONED` 25/25 sin índices/Streams/PITR, 1 Lambda `nodejs22.x`/x86_64/256 MB/30 s, 1 Function URL pública (`AuthType: NONE`) con el CORS como única fuente, 1 rol IAM de exactamente dos statements (D-24) y 1 grupo de logs con retención 30 días. Los tres secretos son parámetros `NoEcho`: ni un valor en el repo (I4).
+- **Comandos que aparecen**: `pnpm run validate:iac` (necesita `cfn-lint` en PATH — instalado con visto vía `pip --user`) y `pnpm run docs:diagrams` (exporta los SVG locales). Primera excepción registrada de scripts de dependencia: `allowBuilds: [puppeteer, @puppeteer/browsers]` (**D-41**, tu OK explícito) — cualquier otra entrada falla el gate.
+- **Documentación nueva**: `docs/human/runbook.md` (validación en seco, receta de empaquetado determinista para F08 con su hazard de `.gitignore` documentado, limpieza de la resource policy, premisas I2) y los diagramas `deployment`/`component` (`.mmd` + `.svg`) dibujados sobre los recursos reales del template.
+- **Decisiones**: D-24 (IAM exacto), D-40 (`nodejs22.x` + x86_64), D-41 (excepción Puppeteer), cierre de la fila D-31 (spike del árbol plano: 0 symlinks, zip 856 KB) y premisas de coste pospuestas formalmente a Fase 08 con tu visto (runbook §5).
+- **Riesgos nuevos anotados para F08**: colisión del `FunctionName` físico fijo con un segundo stack (runbook §2.6) y el hazard del ZIP sin dependencias si el empaquetado no usa staging/`.samignore` (§2.5).
 
 ## 0.1.0 — Scaffold del proyecto (Fase 02 · 2026-11-20)
 

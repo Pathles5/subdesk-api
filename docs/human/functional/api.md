@@ -1,6 +1,6 @@
 # API en lenguaje humano — los 4 endpoints de SubDesk
 
-Actualizado: fase 02 · 2026-11-20
+Actualizado: fase 03 · 2026-11-20
 
 > Documento para quien **integra el panel frontend** u **opera la conexión con Telegram**. El contrato machine-readable vinculante es `docs/api/openapi.yaml` (OpenAPI 3.1, nace en Fase 01): si alguna vez este texto y el contrato difieren, **manda el contrato** — repórtalo, no lo asumas. Aquí no hay jerga de AWS: qué envías, qué recibes y qué casos raros existen.
 

@@ -1,6 +1,6 @@
 # SubDesk API
 
-Actualizado: fase 02 · 2026-11-20
+Actualizado: fase 03 · 2026-11-20
 
 > **Qué es:** una **API backend** de gestión de tickets, serverless en AWS, con coste previsto $0 (invariante I2). Recibe mensajes vía webhook, los guarda como tickets en DynamoDB y expone una REST API para un panel de atención.
 >
@@ -28,7 +28,7 @@ Actualizado: fase 02 · 2026-11-20
 | 00 | Arquitectura: AWS SAM, 1 Lambda + Express + Function URL, pnpm, contrato de variables, política de logs | ✅ `approved` |
 | 01 | Modelo de datos (`TicketsTable`) y contratos de los 4 endpoints congelados (OpenAPI 3.1) | ✅ `approved` |
 | 02 | Scaffold del proyecto (ESM, lint, scripts, tests, `.env.example`) — **los comandos `pnpm` y el código `src/` ya existen** | ✅ entregado (cierre: compuertas + revisión fresh-eyes) |
-| 03 | Infraestructura como código (`template.yaml`: tabla + Lambda + URL + IAM), validada sin desplegar | ⏳ |
+| 03 | Infraestructura como código (`template.yaml`: tabla + Lambda + URL + IAM), validada sin desplegar | ✅ (cerrada 2026-11-20; el deploy NO — es Fase 08 con tu visto) |
 | 04 | Ingesta `POST /webhook/telegram` | ⏳ |
 | 05 | Lectura `GET /api/tickets` + auth | ⏳ |
 | 06 | Mutación `PATCH /api/tickets/{id}` | ⏳ |

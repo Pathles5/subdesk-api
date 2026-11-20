@@ -24,7 +24,7 @@ Materializar en `template.yaml` (AWS SAM, `Transform: AWS::Serverless-2016-10-31
 
 ## 4. Diseño del template (lo que se congela)
 
-### 4.1 Recursos (exactamente estos cinco, vigilados por asserts)
+### 4.1 Recursos (cinco lógicos de topología, vigilados por asserts; la forma física tras A-01 son 7 — ver enmienda)
 
 | Recurso | Propiedades clave | Invariante que cumple |
 |---|---|---|
@@ -92,9 +92,10 @@ El gate §4 de Fase 03 exige los `.svg` de los diagramas → `@mermaid-js/mermai
 ## 8. Riesgos / desviaciones
 
 1. **Las herramientas no están instaladas**: `cfn-lint` vía `python -m pip install --user cfn-lint` (OSS, sin cuentas); `sam`/`aws` **no** hacen falta para el gate de esta fase — se piden solo si el usuario autoriza las lecturas de premisas de C8 (o se posponen a Fase 08 con la evidencia). Instalaciones locales: requieren OK explícito del usuario.
-2. D-41 abre la primera excepción de build-scripts del repo; mitigación: nombrada y estrecha, y el assert FAIL si alguien añade más entradas a `allowBuilds` sigue activo.
-3. El `CodeUri: ./` empaquetado con devDeps podría inflar el artefacto si CI no filtra: documentado en runbook (`--build-in-place` no se usa; el paquete de SAM en Fase 08 corre con `pnpm install --prod`).
+2. D-41 abre la primera excepción de build-scripts del repo; mitigación: nombrada y estrecha, y el assert FAIL si alguien añade más entradas a `allowBuilds` sigue activo (whitelist codificada en `check.ps1`: solo `puppeteer` y `@puppeteer/browsers`).
+3. **(ampliado en el cierre por la revisión, desv. D3)** El hazard del empaquetado es más grave que «inflar el artefacto»: `sam package` respeta `.gitignore`, cuyo patrón `node_modules/` puede dejar el ZIP **sin dependencias** (`ERR_MODULE_NOT_FOUND` en el primer invoke). Precondición del pipeline F08 documentada en runbook §2.5: staging explícito o `.samignore`, y **verificación del contenido del ZIP antes de proponer el deploy**. Además: `validate:iac` depende de un binario fuera de pnpm en PATH — el workflow de F08 debe fijar su instalación como paso explícito.
 4. `Cors AllowOrigins ['*']` sigue siendo estado de desarrollo anotado (I4): revisión con enmienda si el panel pide credenciales.
+5. **(nuevo en el cierre, desv. D4)** `FunctionName: TicketApiFunction` fijo → colisión con un segundo stack en la misma cuenta+región (el bot-hijo debe usar nombres propios) y riesgo de huérfanos tras un `sam delete` interrumpido. Mitigaciones y alternativa `${AWS::StackName}-` prefijado (con enmienda): runbook §2.6.
 
 ## 9. Amendments
 

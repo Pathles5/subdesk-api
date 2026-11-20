@@ -1,6 +1,6 @@
 # Arquitectura técnica — SubDesk API
 
-Actualizado: fase 02 · 2026-11-20
+Actualizado: fase 03 · 2026-11-20
 
 > Documento para quien va a mantener el código. Las decisiones con su historia están en `DECISIONS.md` (se enlazan por ID); los criterios por fase están en `docs/specs/`. El contrato de la API se publica en `docs/api/openapi.yaml` (nace en Fase 01).
 
