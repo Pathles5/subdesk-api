@@ -1,0 +1,392 @@
+{
+  "info": {
+    "name": "SubDesk API — tickets backend (stub era, Fase 02)",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+    "description": "Coleccion derivada del contrato congelado docs/api/openapi.yaml (OpenAPI 3.1, D-34: unica ruta del contrato).\n\nEstado real del backend hoy (post-Fase 02): la app local levanta y la SEGURIDAD es definitiva (401/403/404 con envelope D-20); los 4 endpoints responden 501 'not implemented yet' hasta las Fases 04-07. Cada request lleva dos expectativas: la de HOY (stub) y la DEFINITIVA de su fase, comentadas en el script.\n\nContra el server local: baseUrl = http://localhost:3000 con el .env de desarrollo (valores demo en las variables). Contra el despliegue real (Fase 08): baseUrl = la Lambda Function URL y las variables pasan a los secretos reales — NUNCA se commitean valores reales en esta coleccion."
+  },
+  "variable": [
+    { "key": "baseUrl", "value": "http://localhost:3000", "type": "string", "description": "Local: pnpm run dev. Produccion: Function URL (Fase 08)." },
+    { "key": "adminApiKey", "value": "postman-demo-key-2026", "type": "string", "description": "Valor DEMO local = ADMIN_API_KEY de tu .env. En produccion, el secreto real via GitHub Secrets (I4)." },
+    { "key": "webhookSecret", "value": "postman-demo-secret", "type": "string", "description": "Valor DEMO local = TELEGRAM_WEBHOOK_SECRET de tu .env." },
+    { "key": "ticketId", "value": "2f6cf473-16d5-5b61-9a3f-08e1a0d1f4e7", "type": "string", "description": "Id ilustrativo (no es un v5 real). Con tickets reales (Fase 04+) usa el id devuelto por GET /api/tickets." }
+  ],
+  "item": [
+    {
+      "name": "1 · Webhook (entrada de Telegram)",
+      "description": "POST /webhook/telegram — publico pero autenticado con X-Telegram-Bot-Api-Secret-Token (D-21). Unica no-2xx: secreto invalido 403.",
+      "item": [
+        {
+          "name": "Mensaje de texto valido → hoy 501 · Fase 04: 200 {received}",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "X-Telegram-Bot-Api-Secret-Token", "value": "{{webhookSecret}}" }
+            ],
+            "url": { "raw": "{{baseUrl}}/webhook/telegram", "host": ["{{baseUrl}}"], "path": ["webhook", "telegram"] },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"update_id\": 482391756,\n  \"message\": {\n    \"message_id\": 42,\n    \"from\": { \"id\": 112233445, \"is_bot\": false, \"first_name\": \"Ana\", \"username\": \"ana_example\" },\n    \"chat\": { \"id\": 112233445, \"type\": \"private\" },\n    \"date\": 1763424000,\n    \"text\": \"Hola, mi suscripcion no se ha renovado.\"\n  }\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "description": "Update real de Telegram (ejemplo del contrato, update_id 482391756). Tras la Fase 04 crea un ticket PENDING y responde {\"received\":true}; reenviar el MISMO update_id da {\"ignored\":\"duplicate\"} (dedupe D-19)."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('transport OK (501 stub hoy | 200 desde Fase 04)', function () {",
+                  "    pm.expect([200, 501]).to.include(pm.response.code);",
+                  "});",
+                  "pm.test('envelope/JSON valido en ambos casos', function () {",
+                  "    const b = pm.response.json();",
+                  "    if (pm.response.code === 501) { pm.expect(b.error.code).to.eql('INTERNAL'); }",
+                  "    else { pm.expect(b.received).to.eql(true); }",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "SIN cabecera de secreto → 403 (definitivo)",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": { "raw": "{{baseUrl}}/webhook/telegram", "host": ["{{baseUrl}}"], "path": ["webhook", "telegram"] },
+            "body": { "mode": "raw", "raw": "{ \"update_id\": 1, \"message\": { \"text\": \"hola\" } }", "options": { "raw": { "language": "json" } } },
+            "description": "El unico caso no-2xx del webhook (D-21, contrato openapi.yaml)."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('403 FORBIDDEN', function () { pm.response.to.have.status(403); });",
+                  "pm.test('code FORBIDDEN', function () { pm.expect(pm.response.json().error.code).to.eql('FORBIDDEN'); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Secreto ERRONEO → 403 (definitivo)",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "X-Telegram-Bot-Api-Secret-Token", "value": "secreto-equivocado-123" }
+            ],
+            "url": { "raw": "{{baseUrl}}/webhook/telegram", "host": ["{{baseUrl}}"], "path": ["webhook", "telegram"] },
+            "body": { "mode": "raw", "raw": "{ \"update_id\": 2 }", "options": { "raw": { "language": "json" } } }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": { "type": "text/javascript", "exec": ["pm.test('403', function () { pm.response.to.have.status(403); });"] }
+            }
+          ]
+        },
+        {
+          "name": "callback_query (no-mensaje) → hoy 501 · Fase 04: 200 {ignored:unsupported_update}",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "X-Telegram-Bot-Api-Secret-Token", "value": "{{webhookSecret}}" }
+            ],
+            "url": { "raw": "{{baseUrl}}/webhook/telegram", "host": ["{{baseUrl}}"], "path": ["webhook", "telegram"] },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"update_id\": 482391757,\n  \"callback_query\": { \"id\": \"1234567890\", \"from\": { \"id\": 112233445, \"is_bot\": false, \"first_name\": \"Ana\" }, \"chat_instance\": \"-1234567890\", \"data\": \"plan=pro;dur=1m\" }\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "description": "Update que no crea ticket (los botones los resuelve el bot-hijo, D-38; aqui llegan y se ignoran con ack 200 para que Telegram no reintente, contrato §5.1)."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 desde Fase 04 | 501 stub hoy', function () { pm.expect([200, 501]).to.include(pm.response.code); });"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "2 · Cola de tickets (panel, x-api-key)",
+      "item": [
+        {
+          "name": "GET /api/tickets SIN clave → 401 (definitivo)",
+          "request": {
+            "method": "GET",
+            "url": { "raw": "{{baseUrl}}/api/tickets", "host": ["{{baseUrl}}"], "path": ["api", "tickets"] }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('401 UNAUTHORIZED', function () { pm.response.to.have.status(401); });",
+                  "pm.test('mensaje literal del contrato', function () {",
+                  "    const e = pm.response.json().error;",
+                  "    pm.expect(e.code).to.eql('UNAUTHORIZED');",
+                  "    pm.expect(e.message).to.eql('missing x-api-key header');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "GET /api/tickets clave INVALIDA → 403 (definitivo)",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "x-api-key", "value": "la-clave-que-no-es" }],
+            "url": { "raw": "{{baseUrl}}/api/tickets", "host": ["{{baseUrl}}"], "path": ["api", "tickets"] }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('403 FORBIDDEN', function () { pm.response.to.have.status(403); });",
+                  "pm.test('code FORBIDDEN', function () { pm.expect(pm.response.json().error.code).to.eql('FORBIDDEN'); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "GET /api/tickets clave OK → hoy 501 · Fase 05: 200 {tickets,next_cursor}",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "x-api-key", "value": "{{adminApiKey}}" }],
+            "url": {
+              "raw": "{{baseUrl}}/api/tickets?limit=50",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "tickets"],
+              "query": [{ "key": "limit", "value": "50", "description": "1-100, default 50" }]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('501 stub hoy | 200 desde Fase 05', function () { pm.expect([200, 501]).to.include(pm.response.code); });",
+                  "if (pm.response.code === 200) {",
+                  "    pm.test('forma TicketList del contrato', function () {",
+                  "        const b = pm.response.json();",
+                  "        pm.expect(b).to.be.an('object').that.has.all.keys('tickets', 'next_cursor');",
+                  "    });",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "GET /api/tickets?status=PENDING → hoy 501 · Fase 05: 200 filtrado",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "x-api-key", "value": "{{adminApiKey}}" }],
+            "url": {
+              "raw": "{{baseUrl}}/api/tickets?status=PENDING&limit=20",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "tickets"],
+              "query": [
+                { "key": "status", "value": "PENDING" },
+                { "key": "limit", "value": "20" }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": { "type": "text/javascript", "exec": ["pm.test('501 hoy | 200 Fase 05', function () { pm.expect([200, 501]).to.include(pm.response.code); });"] }
+            }
+          ]
+        },
+        {
+          "name": "GET /api/tickets?status=BOGUS → hoy 501 · Fase 05: 400 VALIDATION_ERROR",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "x-api-key", "value": "{{adminApiKey}}" }],
+            "url": {
+              "raw": "{{baseUrl}}/api/tickets?status=BOGUS",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "tickets"],
+              "query": [{ "key": "status", "value": "BOGUS", "description": "fuera del enum PENDING|IN_PROGRESS|RESOLVED" }]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": { "type": "text/javascript", "exec": ["pm.test('501 hoy | 400 Fase 05', function () { pm.expect([400, 501]).to.include(pm.response.code); });"] }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "3 · Mutacion de estado",
+      "item": [
+        {
+          "name": "PATCH /api/tickets/{id} → IN_PROGRESS · hoy 501 · Fase 06: 200/404",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              { "key": "x-api-key", "value": "{{adminApiKey}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/tickets/{{ticketId}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "tickets", "{{ticketId}}"]
+            },
+            "body": { "mode": "raw", "raw": "{ \"status\": \"IN_PROGRESS\" }", "options": { "raw": { "language": "json" } } },
+            "description": "Solo status, solo hacia adelante (IN_PROGRESS|RESOLVED). 400 si intentas PENDING; 404 si el id no existe."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('501 hoy | 200/400/404 desde Fase 06', function () { pm.expect([200, 400, 404, 501]).to.include(pm.response.code); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "PATCH → reabrir a PENDING → hoy 501 · Fase 06: 400",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              { "key": "x-api-key", "value": "{{adminApiKey}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "url": { "raw": "{{baseUrl}}/api/tickets/{{ticketId}}", "host": ["{{baseUrl}}"], "path": ["api", "tickets", "{{ticketId}}"] },
+            "body": { "mode": "raw", "raw": "{ \"status\": \"PENDING\" }", "options": { "raw": { "language": "json" } } },
+            "description": "Prohibido: las transiciones no reabren (spec 01 §4.3)."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": { "type": "text/javascript", "exec": ["pm.test('501 hoy | 400 desde Fase 06', function () { pm.expect([400, 501]).to.include(pm.response.code); });"] }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "4 · Respuesta al usuario (reply)",
+      "item": [
+        {
+          "name": "POST /api/tickets/{id}/reply → hoy 501 · Fase 07: 200/404/409/502",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "x-api-key", "value": "{{adminApiKey}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "url": { "raw": "{{baseUrl}}/api/tickets/{{ticketId}}/reply", "host": ["{{baseUrl}}"], "path": ["api", "tickets", "{{ticketId}}", "reply"] },
+            "body": {
+              "mode": "raw",
+              "raw": "{ \"response_text\": \"Hola Ana: he revisado tu caso y la suscripcion queda renovada 30 dias mas.\" }",
+              "options": { "raw": { "language": "json" } }
+            },
+            "description": "sendMessage ANTES de persistir; RESOLVED solo con OK real de Telegram; 502 deja el item intacto (D-20/spec 01 §5.4)."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('501 hoy | 200/400/404/409/502 desde Fase 07', function () { pm.expect([200, 400, 404, 409, 502, 501]).to.include(pm.response.code); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST reply con text vacio → hoy 501 · Fase 07: 400",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "x-api-key", "value": "{{adminApiKey}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "url": { "raw": "{{baseUrl}}/api/tickets/{{ticketId}}/reply", "host": ["{{baseUrl}}"], "path": ["api", "tickets", "{{ticketId}}", "reply"] },
+            "body": { "mode": "raw", "raw": "{ \"response_text\": \"   \" }", "options": { "raw": { "language": "json" } } }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": { "type": "text/javascript", "exec": ["pm.test('501 hoy | 400 desde Fase 07', function () { pm.expect([400, 501]).to.include(pm.response.code); });"] }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "5 · Transversales",
+      "item": [
+        {
+          "name": "GET ruta inexistente → 404 envelope (definitivo)",
+          "request": {
+            "method": "GET",
+            "url": { "raw": "{{baseUrl}}/nope", "host": ["{{baseUrl}}"], "path": ["nope"] }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('404 NOT_FOUND', function () { pm.response.to.have.status(404); });",
+                  "pm.test('code NOT_FOUND', function () { pm.expect(pm.response.json().error.code).to.eql('NOT_FOUND'); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "GET /api/tickets clave OK con JSON roto en PATCH → 400 (definitivo)",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              { "key": "x-api-key", "value": "{{adminApiKey}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "url": { "raw": "{{baseUrl}}/api/tickets/{{ticketId}}", "host": ["{{baseUrl}}"], "path": ["api", "tickets", "{{ticketId}}"] },
+            "body": { "mode": "raw", "raw": "{ \"status\": BROKEN", "options": { "raw": { "language": "json" } } },
+            "description": "JSON malformado en /api/* → 400 VALIDATION_ERROR (en el webhook, desde Fase 04, seria 200 unsupported_update — I5)."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": ["pm.test('400', function () { pm.response.to.have.status(400); });"]
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

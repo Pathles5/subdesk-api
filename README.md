@@ -110,6 +110,7 @@ Nada más: ni SDKs ni librerías de bot en este repo. Los reintentos, los format
 |---|---|
 | los endpoints sin jerga AWS (mi panel los va a llamar) | `docs/human/functional/api.md` |
 | el contrato exacto (schemas, códigos, ejemplos) | `docs/api/openapi.yaml` |
+| importar la API en Postman | `docs/api/SubDesk.postman_collection.json` (15 requests con scripts; derivada del contrato) |
 | la tabla y por qué el `id` deduplica sin índices | `docs/human/technical/data-model.md` |
 | cómo encajará el bot (proyecto-hijo: botones, suscripciones, catálogo) | `docs/human/technical/bot-plan.md` (D-38) |
 | la topología y las reglas de capas | `docs/human/technical/architecture.md` |
