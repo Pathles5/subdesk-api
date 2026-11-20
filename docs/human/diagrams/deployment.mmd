@@ -1,0 +1,38 @@
+%% deployment.mmd — despliegue SubDesk API: del repo a los recursos reales del template.yaml
+%% Actualizado: fase 03 · 2026-11-20
+%% Fuente versionada; el .svg se regenera con `pnpm run docs:diagrams` (D-33/D-41, local, sin CDN).
+%% Coherente con template.yaml A-01 (Fase 03): 7 recursos, region us-east-1 fijada en el deploy.
+flowchart LR
+    subgraph dev["Desarrollo (local)"]
+        REPO["repo git<br/>src/ + template.yaml"]
+        GATES["compuertas<br/>pnpm lint/test<br/>validate:api/validate:iac<br/>check.ps1"]
+    end
+
+    subgraph ci["GitHub Actions (Fase 08 — futuro)"]
+        Wf["deploy.yml<br/>pnpm install --frozen-lockfile --prod<br/>zip artefacto (nodeLinker hoisted, D-31)"]
+        SECRETS["GitHub Secrets<br/>TELEGRAM_BOT_TOKEN · ADMIN_API_KEY<br/>TELEGRAM_WEBHOOK_SECRET"]
+    end
+
+    subgraph cfn["CloudFormation stack (us-east-1) — SAM transform D-15"]
+        TABLE[("TicketsTable<br/>PROVISIONED 25/25 · Standard<br/>PK id(S) · sin indices · SSE<br/>I2/D-26")]
+        FN["TicketApiFunction<br/>nodejs22.x · x86_64 · 256 MB · 30s<br/>handler src/lambda.handler<br/>D-27/D-40"]
+        URL["TicketApiUrlConfig<br/>AWS::Lambda::Url · AuthType NONE<br/>CORS unica fuente (I4)"]
+        PERM["TicketApiUrlInvokePermission<br/>Principal AWS:UrlInvoke"]
+        ROLE["AppRole<br/>Get/Put/Update/Scan sobre la tabla<br/>CreateLogStream/PutLogEvents<br/>sobre SU log group (D-24)"]
+        LOGS["ApiLogGroup<br/>/aws/lambda/TicketApiFunction<br/>retencion 30 dias (I2)"]
+    end
+
+    TG["Telegram<br/>(webhooks entrantes;<br/>el bot-hijo llegara D-38)"]
+    PANEL["Panel frontend<br/>(externo, x-api-key)"]
+
+    REPO --> GATES --> Wf
+    SECRETS -. "--parameter-overrides (NoEcho)" .-> Wf
+    Wf -- "sam deploy (F08, con visto I6)" --> cfn
+    FN --> TABLE
+    ROLE -. "asume" .-> FN
+    FN -. "ARN destino" .-> URL
+    PERM -. "habilita invoke" .-> URL
+    FN --> LOGS
+    TG -- "POST /webhook/telegram<br/>X-…-Secret-Token" --> URL
+    PANEL -- "GET/PATCH/POST /api/*<br/>x-api-key" --> URL
+    FN -- "sendMessage (reply)<br/>fetch nativo" --> TG

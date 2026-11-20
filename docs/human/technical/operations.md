@@ -1,8 +1,8 @@
 # Operaciones — SubDesk API
 
-Actualizado: fase 02 · 2026-11-20
+Actualizado: fase 03 · 2026-11-20
 
-> Documento para **levantar y comprobar el proyecto en local**. La topología y las reglas de capas están en `architecture.md`; el contrato es `docs/api/openapi.yaml`; las decisiones con su historia, en `DECISIONS.md` (se enlazan por ID). Despliegue, `setWebhook`, rotación y coste: `docs/human/runbook.md` (nace en Fase 03).
+> Documento para **levantar y comprobar el proyecto en local**. La topología y las reglas de capas están en `architecture.md`; el contrato es `docs/api/openapi.yaml`; las decisiones con su historia, en `DECISIONS.md` (se enlazan por ID). Despliegue, `setWebhook`, rotación y coste: `docs/human/runbook.md` (existe desde la Fase 03 con la sección de despliegue en seco; se completa en Fase 08).
 
 ## Arranque local
 
@@ -22,12 +22,19 @@ No hay comando `deploy` ni nada que toque AWS desde este repo en local: la infra
 
 | Comando | Qué comprueba | Estado en esta fase |
 |---|---|---|
-| `pnpm install --frozen-lockfile` | dependencias reproducibles contra `pnpm-lock.yaml`, **sin ejecutar scripts de dependencias** (I4b/D-30); `allowBuilds` sigue `[]` | ✓ |
+| `pnpm install --frozen-lockfile` | dependencias reproducibles contra `pnpm-lock.yaml`, **sin ejecutar scripts de dependencias** (I4b/D-30); `allowBuilds` solo admite la excepción registrada en **D-41** (`puppeteer`, `@puppeteer/browsers`) — cualquier entrada extra es fallo de `check.ps1` | ✓ |
 | `pnpm run lint` | ESLint flat config sobre `src/` + `tests/`. No es solo estilo: **mecaniza la arquitectura** (spec §7) — `process.env` solo en `src/config.js` (D-17) y `serverless-http` solo en `src/lambda.js` (D-28). `@aws-sdk/*` está vetado en `src/**` **con el override que ya lo permite** dentro de `src/repositories/**` (preparado en A-02 para la Fase 04), y los tests siguen exentos de las restricciones de import | ✓ |
 | `pnpm test` | `node --test "tests/**/*.test.js"` → **27 tests**: unidades de `apiKey` (401/403), `webhookGuard` (gate de secreto y ack), `config` (las 7 variables, errores sin valores), smoke de la app con `supertest` (los 4 endpoints como stub `501`, `404`, `403` de secreto y `400` de JSON malformado) y el **test de contrato de superficie** | ✓ 27/27 |
 | `pnpm run validate:api` | `redocly lint docs/api/openapi.yaml` (D-33). Rompe solo con **errores**; hoy pasa con 1 warning deliberado y aceptado: `info-license` (no tenemos licencia que citar) | ✓ |
-| `pnpm run check` | `scripts/check.ps1`: compuerta del harness — frescura de `docs/human/**` (I8), higiene de secretos, asserts de cadena de suministro (I7) y forma del contrato | verde **con los artefactos de esta fase ya escritos**; su corrida formal se registra en T-09 |
+| `pnpm run validate:iac` | `cfn-lint template.yaml` (D-31): esquema, tipos y propiedades del transform SAM **offline, sin credenciales y sin ejecutar scripts de dependencias**. Nace en la Fase 03 con el `template.yaml`; `sam build`/`sam validate` **no** son compuerta. Requiere tener en el PATH de usuario el `Scripts` de pip donde quedó `cfn-lint` (nota debajo) | nace en esta fase; su corrida formal se registra en T-10 |
+| `pnpm run check` | `scripts/check.ps1`: compuerta del harness — frescura de `docs/human/**` (I8), higiene de secretos, asserts de cadena de suministro (I7), forma del contrato y **asserts de IaC sobre el `template.yaml`** desde la Fase 03 | verde en la Fase 02 (allí se registró su corrida, T-09); con la plantilla de la Fase 03 se re-corre en su T-10 |
 | smoke manual en dev | los 5 casos de abajo contra `pnpm run dev`, con `curl` | ver siguiente bloque |
+
+### La herramienta fuera de pnpm: `cfn-lint`
+
+`cfn-lint` es una herramienta Python, no un paquete de Node, así que **no** entra en `package.json` ni en `pnpm-lock.yaml`: se instala en el entorno del desarrollador y el script `validate:iac` solo la invoca. Estado de esta máquina: **`cfn-lint` 1.61.0**, instalado con `python -m pip install --user cfn-lint` (OSS, sin cuentas, sin coste: I2), con el visto explícito del usuario del 2026-11-20. El ejecutable queda en `%APPDATA%\Python\Python313\Scripts`, que debe estar en el **PATH de usuario**; si no lo está, el fallo es «`cfn-lint` no se reconoce como comando», no un error de la plantilla. Se comprueba con `cfn-lint --version`.
+
+`sam` y `aws` **no** están instalados a propósito: ninguna compuerta los necesita (D-31) y solo harían falta para el despliegue y las lecturas de premisas de la Fase 08, donde su instalación se pedirá con visto (I6). Procedimiento completo: `docs/human/runbook.md` §1.
 
 ### Smoke manual (los 5 casos verificados en seco)
 
@@ -89,7 +96,7 @@ La redacción es **por construcción**, no una promesa: `src/utils/logger.js` ma
 
 - `LOG_LEVEL=silent` existe y está testiado como valor válido: no emite nada. Sirve para correr suites o herramientas sin ensuciar la salida (en el smoke de tests alguna línea `error` sí aparece, porque el guard del webhook registra sus fallos — no es un fallo del test).
 - El `webhookGuard` loguea con un logger propio de umbral `info`, para que un error del webhook sea visible aunque el entorno esté en `error`.
-- Retención de CloudWatch (≤ 30 días) y límites de plataforma: se documentan en Fase 03 con el `template.yaml`.
+- La **retención ≤ 30 días** es propiedad del `LogsGroup` explícito de la plantilla (`RetentionInDays: 30`, spec §4.1 de Fase 03; por eso el rol de D-24 no necesita `logs:CreateLogGroup`). Dónde se lee y qué hay que limpiar al borrar la Function URL: `docs/human/runbook.md` §3 y §4. Los límites de plataforma (30 s de invocación, 6 MB de payload) están en `functional/api.md`.
 
 ## Cuarentena de dependencias (`minimumReleaseAge: 1440`)
 
@@ -98,3 +105,5 @@ Es una **política de cadena de suministro**, no una preferencia: pnpm rechaza r
 Qué hizo ayer en este repo: `@redocly/cli` **2.82.0** se había publicado esa misma mañana y la cuarentena **bloqueó la instalación**. La respuesta fue bajar a `2.81.0` (ya cuarentenada), **no** tocar la política.
 
 Si algún día hace falta eximir un paquete (por ejemplo un fix de seguridad urgente que solo exista en una versión recién publicada), **no es un ajuste local**: exige decisión registrada en `DECISIONS.md` con nombre, versión, motivo **y tu OK explícito**, aplicando `minimumReleaseAgeExclude` solo a ese paquete — nunca global (riesgo 2 de D-30). Lo mismo aplica a `allowBuilds`, `pnpmfile` o `patchedDependencies`.
+
+Ya hay un precedente de ese trámite con `allowBuilds`: **D-41** (visto del usuario 2026-11-20) registró la única excepción activa, `puppeteer` y `@puppeteer/browsers`, porque `@mermaid-js/mermaid-cli` baja Chromium en su postinstall y el gate de Fase 03 exige los `.svg` sin CDN (I8d). Son devDependencies: no viajan al artefacto Lambda (el empaquetado corre con `pnpm install --prod`). `check.ps1` sigue fallando ante **cualquier** entrada adicional.

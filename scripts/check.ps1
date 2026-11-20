@@ -197,8 +197,14 @@ if (Test-Path $pkgPath) {
             }
             foreach ($entry in ([regex]::Matches($ws, '(?mi)^\s*allowBuilds\s*:([\s\S]*?)(\r?\n\S|\z)'))) {
                 $body = $entry.Groups[1].Value
-                $listed = ([regex]::Matches($body, '(?m)^\s*-\s*["'']?([A-Za-z0-9@/_.-]+)')).Count
-                if ($listed -gt 0) { Add-Fail "allowBuilds lists $listed dependency build script(s): each requires a registered DECISIONS.md entry AND explicit user OK (I4b / D-30). Reviewer-only checks are not enough (phase-00 debt closed in A-03)." }
+                $listed = [regex]::Matches($body, "(?m)^\s*-\s*[`"']?([A-Za-z0-9@/_.-]+)[`"']?") | ForEach-Object { $_.Groups[1].Value }
+                $registered = @('puppeteer', '@puppeteer/browsers')   # D-41 exception list (user OK 2026-11-20)
+                foreach ($pkgBuild in $listed) {
+                    if ($registered -notcontains $pkgBuild) {
+                        Add-Fail "allowBuilds entry '$pkgBuild' is not registered: adding a dependency build script requires a DECISIONS.md entry AND explicit user OK (I4b / D-30; D-41 is the only registered exception)."
+                    }
+                }
+                if (@($listed).Count -gt 0) { Add-Note "allowBuilds: $(@($listed) -join ', ') - registered under D-41." }
             }
             if ($ws -match "(?mi)^\s*allowBuilds\s*:\s*\[\s*[^\]\s]") {
                 Add-Fail "allowBuilds is non-empty (inline form): each entry requires a registered DECISIONS.md entry AND explicit user OK (I4b / D-30)."
@@ -347,6 +353,12 @@ if ($cfnFiles.Count -gt 0) {
         Add-Note "IaC: SAM transform not detected in the scanned files (expected if using SAM syntax)."
     }
     if ($iacRaw -match 'arn:aws:iam::\*|Resource:\s*"?\*"') { Add-Fail "IaC asserts: wildcard IAM resource/policy detected (I4 least privilege)." }
+    # Single-region rule (I7; phase-00 debt closed in phase 03): every region literal must be us-east-1.
+    $regionLiterals = [regex]::Matches($iacRaw, '\b([a-z]{2}-[a-z]+-\d+)\b') | ForEach-Object { $_.Groups[1].Value } | Sort-Object -Unique
+    $foreignRegions = $regionLiterals | Where-Object { $_ -ne 'us-east-1' }
+    if ($foreignRegions) { Add-Fail "IaC asserts: non-us-east-1 region literal(s) found ($($foreignRegions -join ', ')) - the architecture is single-region us-east-1 (I2/I7)." }
+    elseif ($regionLiterals) { Add-Note "IaC: single region us-east-1 declared explicitly." }
+    else { Add-Note "IaC: no region literal in templates (fine - region is set at deploy time; keep it us-east-1 in the runbook)." }
 } else {
     Add-Note "No IaC template yet (template.yaml) - expected before phase 03."
 }

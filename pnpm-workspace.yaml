@@ -4,9 +4,11 @@
 packages: ["."]
 
 nodeLinker: hoisted          # flat node_modules for the Lambda ZIP artifact (no symlinks; D-30, spike D-31 in phase 03)
-ignoreScripts: true          # no dependency lifecycle scripts, ever
+ignoreScripts: true          # no dependency lifecycle scripts EXCEPT the registered allowBuilds exceptions below
 strictDepBuilds: true
-allowBuilds: []              # nothing may run install scripts; adding an entry requires a registered decision
+allowBuilds:                   # registered exceptions ONLY (D-41, user OK 2026-11-20); any other entry requires a decision
+  - puppeteer
+  - '@puppeteer/browsers'
 minimumReleaseAge: 1440      # 24 h quarantine for freshly published versions
 trustPolicy: no-downgrade
 blockExoticSubdeps: true     # no git/tarball/link transitive deps

@@ -54,7 +54,7 @@ docs/
     technical/data-model.md    la tabla, el id determinista, costes por operación
 scripts/check.ps1              compuerta mecánica (docs, higiene de secretos, asserts IaC)
 src/ tests/                scaffold vivo desde Fase 02 (capas + seguridad + tests; stubs 501)
-template.yaml              nace en Fase 03
+template.yaml              IaC SAM (Fase 03): validada estaticamente, NO desplegada (deploy = Fase 08 con tu visto)
 ```
 
 ## Comandos
@@ -71,7 +71,7 @@ pnpm run validate:api              # lint de docs/api/openapi.yaml (@redocly/cli
 pnpm run check                     # compuerta del harness (equivale a: powershell -File scripts/check.ps1)
 ```
 
-Desde la Fase 03 se añade `pnpm run validate:iac` (`cfn-lint template.yaml`, offline y sin credenciales); el `template.yaml` todavía no existe.
+Desde la Fase 03 se añade `pnpm run validate:iac` (`cfn-lint template.yaml`, offline y sin credenciales); la herramienta vive fuera de pnpm (pip --user, documentado en `docs/human/technical/operations.md`) y el `template.yaml` existe desde el 2026-11-20 — validado, aún sin desplegar.
 
 Qué prueba cada compuerta, el smoke manual con `curl` y la política de logs: `docs/human/technical/operations.md`.
 

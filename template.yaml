@@ -1,0 +1,211 @@
+# template.yaml — SubDesk API infrastructure (AWS SAM, D-15)
+# Phase 03 (docs/specs/03-iac/spec.md §4). Binding topology: 1 DynamoDB table
+# (PROVISIONED 25/25, Standard, no GSI/LSI/Streams/PITR/auto scaling — I2/D-26),
+# 1 Lambda Event Function behind 1 Function URL (AuthType NONE — D-27), 1 least-
+# privilege role (D-24), explicit log group with 30-day retention (I2), and the
+# Lambda resource-policy statement that AuthType: NONE requires.
+# Secrets are NEVER stored here: they arrive as NoEcho Parameters injected in CI
+# with --parameter-overrides from GitHub Secrets (Fase 08 workflow).
+# Single region: us-east-1 (deploy-time only; the template declares no region).
+# Validation gate: `cfn-lint template.yaml` (offline, no credentials — I7/D-31),
+# exit 0, no suppressed rules.
+
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: >-
+  SubDesk API: one Lambda (Express via serverless-http) behind a Function URL,
+  one provisioned DynamoDB table (25/25), one least-privilege role. $0 free-tier
+  topology (constitution I2, decisions D-26/D-27).
+
+Parameters:
+  TelegramBotTokenParam:
+    Type: String
+    NoEcho: true
+    # Telegram bot tokens look like "<12-digit bot id>:<35-char secret>"; the
+    # pattern only enforces shape and a >=16 char minimum, it never stores a value.
+    AllowedPattern: '^[0-9]{8,}:[A-Za-z0-9_-]{8,}$'
+    Description: >-
+      Telegram bot token used by POST /api/tickets/{id}/reply (sendMessage).
+      Injected at deploy time via --parameter-overrides from the GitHub Secret
+      TELEGRAM_BOT_TOKEN. Never commit this value to git.
+
+  AdminApiKeyParam:
+    Type: String
+    NoEcho: true
+    # Opaque API key compared against the x-api-key header (I4): alphanumeric
+    # plus -_. with a >=16 char minimum.
+    AllowedPattern: '^[A-Za-z0-9._-]{16,}$'
+    Description: >-
+      Admin API key validated against the x-api-key header on /api/* routes.
+      Injected at deploy time via --parameter-overrides from the GitHub Secret
+      ADMIN_API_KEY. Never commit this value to git.
+
+  WebhookSecretParam:
+    Type: String
+    NoEcho: true
+    # Value of X-Telegram-Bot-Api-Secret-Token; any >=16 char non-whitespace
+    # token (Telegram accepts ASCII 1-256 chars, no whitespace).
+    AllowedPattern: '^\S{16,}$'
+    Description: >-
+      Shared secret verified on every Telegram webhook call and registered with
+      setWebhook. Injected at deploy time via --parameter-overrides from the
+      GitHub Secret TELEGRAM_WEBHOOK_SECRET. Never commit this value to git.
+
+Resources:
+  TicketsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      BillingMode: PROVISIONED
+      ProvisionedThroughput:
+        ReadCapacityUnits: 25
+        WriteCapacityUnits: 25
+      AttributeDefinitions:
+        - AttributeName: id
+          AttributeType: S
+      KeySchema:
+        - AttributeName: id
+          KeyType: HASH
+      SSESpecification:
+        SSEEnabled: true
+      Tags:
+        - Key: Project
+          Value: subdesk-api
+
+  TicketApiFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      # Pinned physical name: the log group name and the role's log-stream ARN
+      # below are built from this literal, so the pairing is deterministic.
+      FunctionName: TicketApiFunction
+      # Handler is ESM (package.json "type": "module"); nodejs22.x supports ESM
+      # handlers natively (D-40). Packaging: flat hoisted node_modules tree,
+      # built by deterministic pnpm steps, never by sam build scripts (D-31).
+      Handler: src/lambda.handler
+      Runtime: nodejs22.x
+      Architectures:
+        - x86_64
+      CodeUri: ./
+      MemorySize: 256
+      Timeout: 30
+      Role: !GetAtt AppRole.Arn
+      Environment:
+        Variables:
+          TABLE_NAME: !Ref TicketsTable
+          TELEGRAM_BOT_TOKEN: !Ref TelegramBotTokenParam
+          ADMIN_API_KEY: !Ref AdminApiKeyParam
+          TELEGRAM_WEBHOOK_SECRET: !Ref WebhookSecretParam
+          LOG_LEVEL: info
+          # v1 is single-stage (D-17): fixed 'dev', not a stack Parameter.
+          STAGE: dev
+
+  AppRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        # D-24 (spec 03 §4.2): exactly two statements, nothing else. No managed
+        # policies, no logs:CreateLogGroup (the log group is an explicit
+        # resource below), no dynamodb:Query/Delete/Describe, no wildcards.
+        - PolicyName: SubDeskApiAppPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - dynamodb:GetItem
+                  - dynamodb:PutItem
+                  - dynamodb:UpdateItem
+                  - dynamodb:Scan
+                Resource: !GetAtt TicketsTable.Arn
+              # The function-name segment is the literal that matches the pinned
+              # FunctionName above. A Ref/Sub to the function logical ID here
+              # would close a static cycle Function->Role->Function (cfn-lint
+              # E3004): the spec's !Sub form is byte-identical at deploy time,
+              # this is the narrowest lint-clean equivalent. See report, T-05.
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: !Sub arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/TicketApiFunction:*
+
+  ApiLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      # Pre-created: the implicit group Lambda would auto-create has no
+      # retention (I2 requires <= 30 days). The name matches the pinned
+      # FunctionName. No DependsOn: the Ref substitution in !Sub already
+      # orders this resource after the function (cfn-lint W3005).
+      LogGroupName: !Sub /aws/lambda/${TicketApiFunction}
+      RetentionInDays: 30
+
+  # The Function URL is declared as the CFN-native resource, NOT as the SAM
+  # `FunctionUrlConfig` property. Reason, verified with cfn-lint 1.61.0:
+  # `Fn::GetAtt TicketApiFunction.Url` is rejected (E6101: the SAM schema only
+  # exposes Arn/SnapStart* attributes on AWS::Serverless::Function), the SAM
+  # event/property form supports no LogicalId override, and the generated child
+  # AWS::Lambda::Url has no logical ID visible to the template, so the
+  # FunctionUrl Output cannot be expressed lint-clean any other way. Same
+  # substance (D-27): AuthType NONE, BUFFERED, CORS declared only here.
+  # Cleanup note (Fase 00 §10a, runbook): deleting a NONE-auth URL leaves this
+  # resource policy behind; the stack delete removes the statement too, a
+  # manual URL delete needs manual policy cleanup.
+  TicketApiUrlConfig:
+    Type: AWS::Lambda::Url
+    # The invoke permission is attached to the function before the URL exists.
+    DependsOn: TicketApiUrlInvokePermission
+    Properties:
+      AuthType: NONE
+      # BUFFERED is the default invoke mode and the only billable-free one for
+      # this topology (D-26); declared for explicitness, never response-stream.
+      InvokeMode: BUFFERED
+      TargetFunctionArn: !GetAtt TicketApiFunction.Arn
+      Cors:
+        AllowOrigins:
+          - '*'
+        # OPTIONS is deliberately excluded: the schema's valid method enum does
+        # not include it (cfn-lint E3030) and Function URL answers preflight
+        # itself from this config (I4). Same substance as spec §4.1.
+        AllowMethods:
+          - GET
+          - POST
+          - PATCH
+        # Array form (schema type is array of strings; the spec's single
+        # comma-joined string fails E3012). Headers keep the spec's list.
+        AllowHeaders:
+          - x-api-key
+          - Content-Type
+          - X-Telegram-Bot-Api-Secret-Token
+        MaxAge: 300
+        # AllowCredentials omitted on purpose: invalid with AllowOrigins ['*'] (I4).
+
+  TicketApiUrlInvokePermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      # AuthType: NONE needs this statement for the URL to be callable: it lets
+      # the AWS URL service (AWS:UrlInvoke) bind a public invoke config to OUR
+      # function only. Least privilege comes from FunctionName pinning exactly
+      # one function ARN: AWS::Lambda::Permission admits no Condition, and the
+      # SourceArn of a URL carries a runtime-generated config id, so it cannot
+      # be referenced statically without a cycle. (With SAM's FunctionUrlConfig
+      # the transform injects the equivalent statement implicitly; declared
+      # here explicitly, same effect, auditable.)
+      Action: 'lambda:CreateFunctionUrlConfig'
+      FunctionName: !GetAtt TicketApiFunction.Arn
+      Principal: AWS:UrlInvoke
+
+Outputs:
+  FunctionUrl:
+    Description: Public HTTPS endpoint (the only one; D-27). Register it with setWebhook in Fase 08.
+    Value: !GetAtt TicketApiUrlConfig.FunctionUrl
+  TableName:
+    Description: Single tickets table (PROVISIONED 25/25, I2/D-26).
+    Value: !Ref TicketsTable
+  LogsGroupName:
+    Description: Explicit log group for the function (30-day retention, I2).
+    Value: !Ref ApiLogGroup

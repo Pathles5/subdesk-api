@@ -1,0 +1,27 @@
+%% component.mmd — capas internas de src/ y direccion UNICA de dependencias (D-16, actualizada por D-28)
+%% Actualizado: fase 03 · 2026-11-20
+%% Fuente versionada; el .svg se regenera con `pnpm run docs:diagrams` (D-33/D-41, local, sin CDN).
+flowchart TD
+    LAM["src/lambda.js<br/>serverlessHttp(app) — D-28<br/>UNICO punto que conoce Lambda"]
+    LOC["src/local.js<br/>app.listen(PORT) — pnpm run dev"]
+    APP["src/app.js<br/>createApp(deps): middlewares + routers<br/>+ handler de errores; sin CORS (I4)"]
+    RT["src/routes/<br/>telegram.js · tickets.js<br/>registry.js = fuente unica superficie↔contrato"]
+    MW["src/middleware/<br/>apiKey.js (401/403, timingSafeEqual)<br/>webhookGuard.js (secreto 403; error→200 ignored)"]
+    SVC["src/services/<br/>ticketService · telegramService<br/>(Fases 04–07)"]
+    REPO["src/repositories/<br/>ticketRepository — UNICO DynamoDB<br/>(SDK solo aqui — regla eslint)"]
+    UTIL["src/utils/<br/>http · validation · ids (v5 D-19, F04)<br/>time · logger (D-18)"]
+    CONF["src/config.js<br/>UNICO lector de process.env (D-17)"]
+
+    LAM --> APP
+    LOC --> APP
+    APP --> RT
+    RT --> MW
+    RT --> SVC
+    SVC --> REPO
+    SVC --> UTIL
+    MW --> UTIL
+    REPO --> CONF
+    UTIL --> CONF
+
+    EXT1[("DynamoDB<br/>TicketsTable")] -. "SDK en repositorio<br/>(Fase 04)" .-> REPO
+    EXT2["Telegram Bot API<br/>sendMessage"] -. "fetch nativo<br/>(Fase 07)" .-> SVC
