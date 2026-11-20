@@ -1,38 +1,12 @@
-# Dependencies (pnpm es el unico gestor permitido: constitucion I4b / D-30)
+# Dependencies (pnpm is the only allowed manager; keep pnpm-lock.yaml tracked)
 node_modules/
-.pnpm-store/
-_modules/
 
-# Lockfiles de otros gestores: prohibidos en este repo (I4b). Se listan por si acaso.
-package-lock.json
-yarn.lock
-bun.lockb
-npm-shrinkwrap.json
-
-# Local secrets & env (nunca commit: constitucion I4)
+# Local environment: real secrets never enter git (I4)
 .env
-.env.*
-!.env.example
 
-# Build / packaging / IaC artifacts
-dist/
-build/
-.output/
-.serverless/
-.aws-sam/
-samconfig.toml
-*.zip
-
-# Tests & coverage
-coverage/
-.nyc_output/
-
-# Editors & OS
-.vscode/
-.idea/
-.DS_Store
-Thumbs.db
-
-# Logs
+# Logs and generated, non-committed documentation output (I8d)
 *.log
-npm-debug.log*
+docs/api/api.html
+
+# OS noise
+.DS_Store

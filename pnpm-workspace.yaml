@@ -1,0 +1,15 @@
+# SubDesk API — pnpm workspace / supply-chain policy (constitution I4b, decision D-30).
+# pnpm is the ONLY package manager in this repo; npm and yarn are forbidden.
+# Do not add pnpmfile, patchedDependencies or exotic specs without a DECISIONS.md entry.
+packages: ["."]
+
+nodeLinker: hoisted          # flat node_modules for the Lambda ZIP artifact (no symlinks; D-30, spike D-31 in phase 03)
+ignoreScripts: true          # no dependency lifecycle scripts, ever
+strictDepBuilds: true
+allowBuilds: []              # nothing may run install scripts; adding an entry requires a registered decision
+minimumReleaseAge: 1440      # 24 h quarantine for freshly published versions
+trustPolicy: no-downgrade
+blockExoticSubdeps: true     # no git/tarball/link transitive deps
+verifyStoreIntegrity: true
+verifyDepsBeforeRun: true
+enablePrePostScripts: false

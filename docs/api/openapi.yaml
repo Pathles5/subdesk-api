@@ -287,7 +287,7 @@ components:
               code: UNAUTHORIZED
               message: "missing x-api-key header"
     Forbidden:
-      description: `x-api-key` no coincide con `ADMIN_API_KEY`.
+      description: "`x-api-key` no coincide con `ADMIN_API_KEY`."
       content:
         application/json:
           schema:
@@ -423,7 +423,7 @@ components:
             - "2026-11-17T10:02:11.000Z"
         telegram_update_id:
           type: integer
-          description: `update_id` original de Telegram (trazabilidad/correlacion con sus logs; la deduplicacion es el `id`, D-19).
+          description: "`update_id` original de Telegram (trazabilidad/correlacion con sus logs; la deduplicacion es el `id`, D-19)."
           minimum: 1
 
     TicketList:
@@ -444,7 +444,7 @@ components:
 
     TicketStatusPatch:
       type: object
-      description: Cuerpo de `PATCH /api/tickets/{id}`. Unico campo admitido: `status`, y solo hacia adelante.
+      description: "Cuerpo de `PATCH /api/tickets/{id}`. Unico campo admitido: `status`, y solo hacia adelante."
       additionalProperties: false
       required: [status]
       properties:
