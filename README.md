@@ -1,6 +1,6 @@
 ﻿# SubDesk API
 
-Actualizado: fase 01 · 2026-11-20
+Actualizado: fase 02 · 2026-11-20
 
 > **Qué es:** una **API backend** de gestión de tickets, serverless en AWS, con coste previsto $0 (invariante I2). Recibe mensajes vía webhook, los guarda como tickets en DynamoDB y expone una REST API para un panel de atención.
 >
@@ -27,7 +27,7 @@ Actualizado: fase 01 · 2026-11-20
 |---|---|---|
 | 00 | Arquitectura: AWS SAM, 1 Lambda + Express + Function URL, pnpm, contrato de variables, política de logs | ✅ `approved` |
 | 01 | Modelo de datos (`TicketsTable`) y contratos de los 4 endpoints congelados (OpenAPI 3.1) | ✅ `approved` |
-| 02 | Scaffold del proyecto (ESM, lint, scripts, tests, `.env.example`) — **aquí nacen los comandos `pnpm` y el código `src/`** | ⏳ siguiente |
+| 02 | Scaffold del proyecto (ESM, lint, scripts, tests, `.env.example`) — **los comandos `pnpm` y el código `src/` ya existen** | ✅ entregado (cierre: compuertas + revisión fresh-eyes) |
 | 03 | Infraestructura como código (`template.yaml`: tabla + Lambda + URL + IAM), validada sin desplegar | ⏳ |
 | 04 | Ingesta `POST /webhook/telegram` | ⏳ |
 | 05 | Lectura `GET /api/tickets` + auth | ⏳ |
@@ -58,28 +58,27 @@ src/ tests/ template.yaml      nacen en Fases 02–03 (todavía no existen, a pr
 
 ## Comandos
 
-**Hoy** (con el repo tal cual está) la única herramienta ejecutable es la compuerta documental:
-
-```powershell
-powershell -File scripts/check.ps1    # docs frescos, higiene de secretos, asserts; sin dependencias
-```
-
-**Desde la Fase 02** (scaffold), estos serán los comandos reales del proyecto. El gestor es **pnpm** (`npm`/`npx`/`yarn` están prohibidos por la constitución, I4b/D-30) y `package.json` fijará la versión exacta en `packageManager`:
+Todos son ya reales (Fase 02 entregada: `package.json`, `pnpm-workspace.yaml`, `src/`, `tests/`). El gestor es **pnpm** con la versión exacta fijada en `packageManager` (`pnpm@10.18.1`); `npm`/`npx`/`yarn` están prohibidos por la constitución (I4b/D-30):
 
 ```bash
-pnpm install --frozen-lockfile   # instalar dependencias de forma reproducible
-pnpm run lint                    # ESLint flat config sobre src/ y tests/
-pnpm test                        # unitarios + supertest contra la app + test de contrato openapi
-pnpm run dev                     # node src/local.js — la misma app Express, en local, sin AWS
-pnpm run validate:api            # lint de docs/api/openapi.yaml (@redocly/cli, D-33)
-pnpm run validate:iac            # cfn-lint template.yaml (desde Fase 03; offline, sin credenciales)
+cp .env.example .env               # variables locales (nunca se commitea .env)
+pnpm install --frozen-lockfile     # instalar dependencias de forma reproducible, sin scripts de terceros
+pnpm run dev                       # node --env-file=.env src/local.js → app Express en http://localhost:3000, sin AWS
+pnpm run lint                      # ESLint flat config sobre src/ y tests/ (incluye las reglas que mecanizan las capas)
+pnpm test                          # node:test + supertest: seguridad, smoke y test de contrato contra openapi.yaml
+pnpm run validate:api              # lint de docs/api/openapi.yaml (@redocly/cli 2.81.0, D-33)
+pnpm run check                     # compuerta del harness (equivale a: powershell -File scripts/check.ps1)
 ```
+
+Desde la Fase 03 se añade `pnpm run validate:iac` (`cfn-lint template.yaml`, offline y sin credenciales); el `template.yaml` todavía no existe.
+
+Qué prueba cada compuerta, el smoke manual con `curl` y la política de logs: `docs/human/technical/operations.md`.
 
 No hay comando `deploy`: ningún despliegue ocurre sin propuesta explícita y **visto del usuario** (I6).
 
 ## Variables de entorno (contrato cerrado, D-17)
 
-Siete nombres, leídos solo por `src/config.js`. **Ningún valor real va al repo**: `.env.example` (nace en Fase 02) listará placeholders; en el stack, los secretos entran como `Parameters NoEcho` del template y se inyectan desde secretos de GitHub.
+Siete nombres, leídos solo por `src/config.js`. **Ningún valor real va al repo**: `.env.example` (ya en el repo) lista los siete — los cuatro obligatorios con placeholder en ángulos (`<TABLE_NAME>`, `<TELEGRAM_BOT_TOKEN>`, `<ADMIN_API_KEY>`, `<TELEGRAM_WEBHOOK_SECRET>`) y `LOG_LEVEL`/`STAGE`/`PORT` con su valor por defecto de desarrollo; se copia a `.env` con tus valores (`cp .env.example .env`) y `.env` queda fuera de git. En el stack, los secretos entran como `Parameters NoEcho` del template y se inyectan desde secretos de GitHub.
 
 | Variable | Para qué |
 |---|---|

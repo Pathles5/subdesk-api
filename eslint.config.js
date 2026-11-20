@@ -66,6 +66,14 @@ export default [
     },
   },
   {
+    // D-16: src/repositories/ is the ONLY place the AWS SDK may be imported
+    // (phase 04). The adapter restriction stays active here.
+    files: ["src/repositories/**/*.js"],
+    rules: {
+      "no-restricted-imports": ["error", { paths: LAYER_IMPORT_RESTRICTIONS.paths }],
+    },
+  },
+  {
     // tests/: devDependency imports are the point (supertest, js-yaml, express sub-apps).
     files: ["tests/**/*.js"],
     rules: {

@@ -1,6 +1,6 @@
 ﻿# Arquitectura técnica — SubDesk API
 
-Actualizado: fase 01 · 2026-11-20
+Actualizado: fase 02 · 2026-11-20
 
 > Documento para quien va a mantener el código. Las decisiones con su historia están en `DECISIONS.md` (se enlazan por ID); los criterios por fase están en `docs/specs/`. El contrato de la API se publica en `docs/api/openapi.yaml` (nace en Fase 01).
 
@@ -40,7 +40,7 @@ Panel ──x-api-key─▶│  1× Lambda · Node.js 20 ESM │  ← 256 MB, 30
 
 ```
 src/
-  lambda.js         # UNICA entrada Lambda: serverlessExpress({ app }). Nada de lógica aquí.
+  lambda.js         # UNICA entrada Lambda: serverlessHttp(app) (D-28; antes anunciado como vendia/serverless-express). Nada de lógica aquí.
   local.js          # app.listen(PORT) para `pnpm run dev`: mismo árbol, sin adaptador.
   app.js            # createApp(deps): middlewares globales, montaje de routers, error handler final.
   routes/
@@ -104,8 +104,8 @@ Siete variables, todas a través de `src/config.js` (nunca `process.env` suelto 
 ## Decisiones pendientes (revisado al cerrar Fase 01 · 2026-11-19)
 
 - **Fase 01:** D-19/D-20/D-21/D-22 **resueltas el 2026-11-19** (visto del usuario; registro en `DECISIONS.md`): esquema estricto de 9 atributos, `id` UUID v5 determinista + `Put` condicional (dedup exacta sin GSI), contrato de 4 endpoints con envelope único (7 códigos), seguridad de superficie (`timingSafeEqual`; secreto del webhook → 403) y guards manuales sin librerías. Detalle: `docs/human/technical/data-model.md` + `docs/api/openapi.yaml`.
-- **Fase 02:** versión exacta de pnpm y del adaptador Express↔Function URL (**D-28**); framework y estrategia de tests (**D-23**); instalación de las devDeps del lint/export cuya herramienta ya eligió **D-33** (`@redocly/cli`, `@mermaid-js/mermaid-cli`); constante `TG_UPDATE_NS` en `utils/ids.js`. Deuda del harness asignada: huecos de mecanización de `check.ps1` (ver fila 00 en `INDEX.md`).
+- **Fase 02 (cerrándose hoy):** ✅ fijada la versión exacta de pnpm (`10.18.1`) y el adaptador definitivo (**D-28**: `serverless-http@3.2.0`, la premisa vendia-v5 de la Fase 00 era falsa); ✅ framework de tests (**D-23**: `node:test` + `supertest` + inyección); ✅ instalado `@redocly/cli@2.81.0` para `validate:api` (**D-33**). Pendientes que sobreviven a la fase: constante `TG_UPDATE_NS` en `src/utils/ids.js` (nace con la ingesta, **Fase 04** — en Fase 02 no hay consumidor); `@mermaid-js/mermaid-cli` + diagramas (**Fase 03**); deuda del harness: huecos de mecanización de `check.ps1` (ver fila 00 en `INDEX.md`).
 - **Fase 03:** rol IAM exacto de menor privilegio (**D-24**, el gate cfn-lint ya lo fijó D-31); spike de empaquetado con pnpm árbol plano (**D-31**).
 - **Fase 08:** estrategia de CI/CD, secretos y momento del `setWebhook` (**D-25**).
 - **Futura:** migración a `PAY_PER_REQUEST` (**D-29**, exige OK explícito del usuario).
-- Estado del registro: entradas **registradas** = D-01–D-22, D-26, D-27, D-30–D-38; **solo filas de pendientes** (sin entrada todavía) = D-23, D-24, D-25, D-28, D-29; decisión **vía de escape** futura con OK obligatorio = D-29. Próximo ID libre: **D-39** (la tabla de `DECISIONS.md` es la fuente).
+- Estado del registro: entradas **registradas** = D-01–D-28, D-30–D-38 (desde hoy también **D-23** y **D-28**); **solo filas de pendientes** (sin entrada todavía) = D-24, D-25, D-29; decisión **vía de escape** futura con OK obligatorio = D-29. Próximo ID libre: **D-39** (la tabla de `DECISIONS.md` es la fuente).

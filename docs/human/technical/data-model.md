@@ -1,6 +1,6 @@
-# Modelo de datos — `TicketsTable`
+﻿# Modelo de datos — `TicketsTable`
 
-Actualizado: fase 01 · 2026-11-19
+Actualizado: fase 02 · 2026-11-20
 
 > Documento para quien mantiene el código. Aquí se cuenta **la tabla** en lenguaje humano: qué guarda cada atributo, cómo se deduplica un `update_id` con una sola tabla y sin índices, cómo cambian los estados y qué cuesta cada operación. El contrato vinculante de formas y errores es `docs/api/openapi.yaml`; las reglas con su justificación completa están en la spec de Fase 01 y en `DECISIONS.md` (D-19, D-20, D-21, D-22, D-26).
 

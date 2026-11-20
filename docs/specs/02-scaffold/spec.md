@@ -36,15 +36,15 @@ Que el repo pase de papel a proyecto Node ejecutable con las compuertas vivas: E
 - Runner: **`node:test`** (nativo del runtime, cero dependencias, `--test` con glob propio; I4b mínimo). Assertions `node:assert/strict`.
 - HTTP: **`supertest`** contra `createApp(deps)` — la app real, sin Lambda ni red (patrón D-16).
 - **Mocks sin librerías**: `telegramService` y repositorio reciben sus dependencias por parámetro (fetch real inyectado en prod, fake en test). Nada de `nock`/`aws-sdk-mock`/DynamoDB-local (el scope del SDK llega en Fase 04 con su repo y su fake en memoria; el contrato del fake lo fija esa fase).
-- **Test de contrato (I8b.4), alcance Fase 02 = SUPERFICIE**: `tests/contract/openapi.test.js` lee `docs/api/openapi.yaml` (devDep `js-yaml`) y `src/routes/registry.js` y verifica igualdad de paths+methods y de la exigencia de `x-api-key` por path. Los **códigos por endpoint** se verifican incrementalmente en las fases 04–07 al sustituir cada stub `501` por el handler real (el stub devuelve `501 {"error":{"code":"INTERNAL","message":"not implemented yet — Fase 04/05/06/07"}}`; el 501 es estado de andamiaje, no contrato).
-- Convención de nombres: `tests/**/*.test.js` espejando `src/`; script `pnpm test` = `node --test tests/`.
+- **Test de contrato (I8b.4), alcance Fase 02 = SUPERFICIE**: `tests/contract/openapi.test.js` lee `docs/api/openapi.yaml` (devDep `js-yaml`) y `src/routes/registry.js` y verifica igualdad de paths+methods y de la exigencia de `x-api-key` por path. Los **códigos por endpoint** se verifican incrementalmente en las fases 04–07 al sustituir cada stub `501` por el handler real (el stub devuelve `501 {"error":{"code":"INTERNAL","message":"not implemented yet — Fase N"}}` con N ∈ 4/5/6/7; el 501 es estado de andamiaje, no contrato).
+- Convención de nombres: `tests/**/*.test.js` espejando `src/`; script `pnpm test` = `node --test "tests/**/*.test.js"` (el glob explícito porque Node 22 trata el argumento de directorio como entry point).
 
 ## 5. Scripts y `package.json` (nacen ejecutables)
 
 | Script | Comando | Nota |
 |---|---|---|
 | `dev` | `node --env-file=.env src/local.js` | mismo `createApp()`; `.env` local nunca commiteado |
-| `test` | `node --test tests/` | incluye el test de contrato |
+| `test` | `node --test "tests/**/*.test.js"` | incluye el test de contrato |
 | `lint` | `eslint .` | flat config, `src/` + `tests/` |
 | `check` | `powershell -File scripts/check.ps1` | compuerta del harness |
 | `validate:api` | `redocly lint docs/api/openapi.yaml` | **D-33**; enmienda de precisión 2026-11-20: `--fail-severity` NO existe en @redocly/cli 2.81 (falló el gate en vivo) — por defecto redocly ya solo rompe con ERRORS; nuestro documento pasa con 1 warning (`info-license`, decorativo y deliberado: sin licencia que citar). Si un día un warning debe romper, se decide entonces con config file |
@@ -78,10 +78,10 @@ enablePrePostScripts: false
 - **C1** — `pnpm install --frozen-lockfile` concluye sin scripts de dependencia; `pnpm-lock.yaml` único lockfile; `packageManager` = `pnpm@10.18.1` exacto; `allowBuilds` sigue `[]`.
 - **C2** — `pnpm run lint` en verde sobre `src/` + `tests/` incluyendo las reglas de capas §7 (probar que una import prohibida falla — verificación con fixture temporal borrado después).
 - **C3** — `pnpm test` en verde: unidades de `apiKey` (401/403/`timingSafeEqual`), `webhookGuard` (excepción → 200 `ignored/internal_error`), `config` (lectura estricta de las 7), smoke supertest (rutas stub 501 + envelope 404) y **contrato de superficie** paths/methods/auth.
-- **C4** — `pnpm run validate:api` en verde (redocly, `--fail-severity=error`).
+- **C4** — `pnpm run validate:api` en verde (redocly lint con la configuración `recommended` incorporada; los warnings no rompen el exit code — así se entregó tras descubrir en el gate que `--fail-severity` no existe en @redocly/cli 2.81; ver enmienda de §5 y A-02).
 - **C5** — `pnpm run check` (o `powershell -File scripts/check.ps1`) PASS con Fase 02 en curso — con `README.md`, `CHANGELOG.md` y `operations.md` presentes y frescos (marca `fase 02`), y `tests/contract/` existiendo (los cuatro FAIL actuales del gate se apagan aquí).
 - **C6** — `pnpm run dev` levanta la app en `PORT` local y responde (verificado en seco: arranca, responde `401` a `/api/tickets` sin key, `404` envelope a ruta inexistente; se documenta en `operations.md`).
-- **C7** — Ningún secreto/valor real en `.env.example` (7 placeholders con ángulos; el escáner de secretos verde).
+- **C7** — Ningún secreto/valor real en `.env.example`: los 4 nombres sensibles en forma con ángulos (`<TABLE_NAME>`…; también evita falsos positivos del escáner, que casa `NOMBRE=valor-largo`), y `LOG_LEVEL`/`STAGE`/`PORT` con valores neutros de ejemplo (`info`/`dev`/`3000` — no son secretos). Escáner de secretos verde.
 - **C8** — Registro en `DECISIONS.md` de D-28 y D-23 con la evidencia del registro npm (2026-11-20) incluida la corrección de la premisa vendia-v5 de Fase 00.
 
 ## 9. Riesgos / desviaciones
@@ -95,4 +95,5 @@ enablePrePostScripts: false
 ## 10. Amendments
 
 - **A-01 · 2026-11-20 (reparación sintáctica del contrato, sin cambio de forma)** — El `pnpm run validate:api` de esta fase (primer parser YAML real que toca el documento) destapó que el contrato congelado de Fase 01 era **YAML inválido** en 3 líneas: 290 y 426 (descripciones que *comienzan* con backtick, carácter reservado) y 447 (un `: ` interior sin comillas). Se repararon entrecomillando los tres escalares; **cero cambios en paths, schemas, códigos ni ejemplos**. Lección mecanizada: desde hoy el parseo real del contrato lo garantizan `validate:api` y el test de contrato en cada gate; el regex de forma de `check.ps1` solo complementa.
+- **A-02 · 2026-11-20 (precisiones post-entrega del implementador, informe T-07/T-08)** — cuatro alineaciones de la prosa de esta spec con el entregado real, sin cambio de diseño: (§4b/§5) el script `test` usa glob explícito `"tests/**/*.test.js"` (Node 22 trata el directorio como entry point); (§4b) el mensaje del stub es `not implemented yet — Fase N` con N ∈ 4/5/6/7 (sin cero); (§5/C4) `validate:api` sin `--fail-severity` — la bandera no existe en @redocly/cli 2.81 y el recommended por defecto ya solo rompe con errores; (§C7) los placeholders con ángulos son los 4 sensibles, y `LOG_LEVEL`/`STAGE`/`PORT` llevan valores neutros. Además: `eslint.config.js` ganó el override que permite `@aws-sdk/*` **solo** en `src/repositories/**` (la regla §7 pedía permitirlo allí; el config entregado lo vetaba en todo `src/` — divergencia 5 del documentador, corregida con `lint` re-corrido). Convención de frescura fijada (divergencia 1): el marcador `Actualizado: fase NN` significa *última fase en que el artefacto fue revisado y se declaró vigente*, y al cerrar cada fase se sube el marcador de **todos** los artefactos requeridos — es el mecanismo literal que AGENTS §6 y `check.ps1` aplican, y deja de leerse como "última edición".
 

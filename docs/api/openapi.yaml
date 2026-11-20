@@ -1,11 +1,11 @@
-# SubDesk API — contrato machine-readable (OpenAPI 3.1). Propiedad del orquestador (I8/D-32):
+﻿# SubDesk API — contrato machine-readable (OpenAPI 3.1). Propiedad del orquestador (I8/D-32):
 # rutas, métodos, códigos y schemas los fija la spec de fase; el documentador maqueta descripciones.
 # Ruta ÚNICA del contrato (D-34). Cambios = enmienda en docs/specs/01-modelo-contratos/spec.md + DECISIONS.md.
 # Lint: `pnpm run validate:api` = `redocly lint docs/api/openapi.yaml` (@redocly/cli, decisión D-33;
 # la instalación de la devDep con versión exacta ocurre en Fase 02 — antes de eso, este archivo se valida a mano).
 # Diagramas: los .mmd/.svg del flujo por endpoint (api-flow) se crean en Fase 04, cuando exista la
 # implementación que representan (I8: nada vacío ni por adelantado); la exportación local es `pnpm run docs:diagrams` (@mermaid-js/mermaid-cli, D-33).
-# Actualizado: fase 01 · 2026-11-19
+# Actualizado: fase 02 · 2026-11-20
 openapi: 3.1.0
 info:
   title: SubDesk API
