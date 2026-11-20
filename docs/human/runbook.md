@@ -1,6 +1,6 @@
 # Runbook — SubDesk API
 
-Actualizado: fase 03 · 2026-11-20
+Actualizado: fase 04 · 2026-11-20
 
 > Documento para **quien opera el stack**: cómo se valida la infraestructura, cómo se desplegará, dónde se leen los outputs, qué hay que limpiar a mano y cómo se comprueba el coste. Topología y capas: `technical/architecture.md`; compuertas de desarrollo: `technical/operations.md`; contrato: `docs/api/openapi.yaml`; decisiones por ID: `DECISIONS.md`.
 
@@ -91,6 +91,45 @@ sam deploy --template-file packaged.yaml --stack-name <NOMBRE_DEL_STACK> --regio
 ```
 
 `--capabilities CAPABILITY_IAM` es obligatorio porque la plantilla crea el rol de D-24; es la señalización explícita de que CloudFormation asume una política IAM, no un bypass. `sam build` no aparece: está fuera de las compuertas y denegado al devops (D-31/D-12).
+
+## 2.7 Identidad y secretos de la pipeline — guía de bootstrap (D-43; replicable a un cliente nuevo)
+
+> **Esta es la guía canónica.** El JSON completo está en `docs/specs/04-pipeline/bootstrap-oidc.md`; aquí se fija *qué* se crea, *dónde* vive cada valor y *qué se cambia* al llevar el proyecto a otra cuenta (la del cliente). El bootstrap lo ejecuta **solo un humano con permisos de IAM en la consola AWS** + admin del repo en GitHub: la pipeline no puede crearse a sí misma (huevo-gallina). Coste: $0.
+
+### A) Pasos (orden y qué se verifica al terminar)
+
+1. **Provider OIDC en AWS** — IAM → Identity providers → OIDC: URL `https://token.actions.githubusercontent.com`, audience `sts.amazonaws.com`.
+   Verificación: el ARN existe (`arn:aws:iam::<ACCOUNT_ID>:oidc-provider/token.actions.githubusercontent.com`). ✔ **Hecho en el dev el 2026-11-20** (ver D) ).
+2. **Rol `SubDeskCiDeployRole`** — trust = provider anterior **con la condición** `repo:<ORG>/<REPO>:environment:Production` (la línea exacta en bootstrap §2; es lo que hace que *solo* el environment aprobado del repo indicado pueda asumir el rol). Adjuntar la inline policy `SubDeskCiDeployPolicy` (bootstrap §2): prefijos `subdesk-api-dev-*` en CloudFormation/IAM/DynamoDB/Logs, Lambda por nombre fijo, bucket SAM gestionado, `iam:PassRole` solo a `lambda.amazonaws.com`. Sin `Resource:"*"` (salvo `sts:GetCallerIdentity`, inerte).
+3. **Alerta de facturación $0** — Billing → Budgets → alerta de gasto mensual con umbral 0 y email. **Antes** del primer deploy (es el detector que I2 exige; no es accionable por IaC: vivir en Billing es su gracia y su límite).
+4. **Environment `Production` en GitHub** — Settings → Environments: nombre `Production`, **Required reviewers = el humano que da el visto** (este mecanismo ES "I6 ejecutable": ningún deploy corre sin su click en Actions), y los 6 valores de C).
+
+### B) Matriz de secretos — qué es cada uno, cómo se genera, dónde se consume
+
+| Secreto (nombre EXACTO) | Qué es | Cómo se genera / obtiene | Validación que lo espera | Dónde se consume | Rotación |
+|---|---|---|---|---|---|
+| `TELEGRAM_BOT_TOKEN` | Token del bot de Telegram (el del **bot de prueba** en el dev; el real cuando exista el bot-hijo, D-38) | @BotFather → `/newbot` → `número:secreto` | AllowedPattern del template: `^[0-9]{8,}:[A-Za-z0-9_-]{8,}$` | `Environment.Variables` de la Lambda (via `TelegramBotTokenParam`); solo `telegramService.js` al llamar `sendMessage` — nunca en logs (D-18) | Revoke/crea token con @BotFather `/revoke` → actualizar el secreto → re-deploy (pipeline) |
+| `ADMIN_API_KEY` | Clave del panel; se compara con la cabecera `x-api-key` | `node -e "console.log(require('crypto').randomUUID())"` (36 chars, cumple ≥16) | AllowedPattern: `^[A-Za-z0-9._-]{16,}$` | via `AdminApiKeyParam` → env `ADMIN_API_KEY`; middleware `apiKey.js` con `timingSafeEqual` | Generar UUID nuevo → actualizar secreto → re-deploy → avisar al panel (breve ventana de dualidad si se quiere cero-corte: futuro, F09) |
+| `TELEGRAM_WEBHOOK_SECRET` | Valor de `X-Telegram-Bot-Api-Secret-Token` que el webhook exige | igual, otro UUID nuevo (distinto del anterior) | AllowedPattern: `^\S{16,}$` | via `WebhookSecretParam` → env `TELEGRAM_WEBHOOK_SECRET`; gate del webhook (403) — **y debe coincidir con el registrado en `setWebhook`** (F09; descuadre = 403 en silencio, riesgo D-21) | Rotar = generar → actualizar secreto → re-deploy → **re-`setWebhook`** con el nuevo valor (comando en runbook §6, F09) |
+| `AWS_ACCOUNT_ID` *(no secreto: variable)* | 12 dígitos de la cuenta destino | cabecera de la consola | — | `deploy.yml` (construcción del rol, logs) | n/a |
+| `AWS_ROLE_ARN` | ARN del rol de paso 2 | `arn:aws:iam::<ACCOUNT_ID>:role/SubDeskCiDeployRole` (copiar del console al crearlo) | — | `aws-actions/configure-aws-credentials` (`role-to-assume`) — la **única** credencial de la pipeline | El rol no tiene claves: no hay nada que rotar; si se revoca confianza, se edita la condición del trust |
+| `AWS_REGION` *(variable)* | `us-east-1` en dev | — | asserts de región de `check.ps1` | todos los comandos `--region` de la pipeline | n/a |
+
+Reglas: los 3 secretos de app viajan del environment → `--parameter-overrides` → `Parameters NoEcho` → env vars; **ninguno** se escribe nunca en el repo, en un log ni en un comando tecleado (I4). Los nombres son contrato (D-17): renombrar uno = enmienda de la spec 01, no un tweak.
+
+### C) Checklist de bootstrap para una cuenta nueva (cliente)
+
+Sustituir en este orden y verificar: (1) `ACCOUNT_ID` (todos los ARNs) · (2) `Pathles5/subdesk-api` → `ORG/REPO` del cliente (condición del trust — **olvidar esto es dejar la puerta abierta**; el assert del runbook lo verifica por lectura) · (3) `subdesk-api-dev` → nombre de stack del cliente (prefijos de policy) · (4) `us-east-1` si su región difiere (y re-validar el assert de región) · (5) crear los 3 secretos de app nuevos (nunca reutilizar los del dev) · (6) alerta $0 antes del primer deploy · (7) `FunctionName: TicketApiFunction` fijo → colisión con otro stack preexistente en la cuenta: comprobar `aws lambda get-function` ANTES del primer apilado del cliente (runbook §2.6; para multi-cliente serio se migraría a `${AWS::StackName}-` con enmienda, previsto y no hecho en v1).
+
+### D) Valores registrados del entorno dev (se rellenan según se ejecuta; NO secrets)
+
+| Item | Valor de dev | Estado |
+|---|---|---|
+| Account ID | `159177056493` | facilitado por el usuario 2026-11-20 (identificador, no credencial) |
+| Provider OIDC | `arn:aws:iam::159177056493:oidc-provider/token.actions.githubusercontent.com` | ✔ creado (reporte del usuario 2026-11-20) |
+| Rol `SubDeskCiDeployRole` | `arn:aws:iam::159177056493:role/SubDeskCiDeployRole` (esperado; pegar el real) | ⏳ paso 2 |
+| GitHub environment `Production` | — | ⏳ paso 4 |
+| Alerta $0 | — | ⏳ paso 3 |
 
 ## 3. Dónde se leen los outputs
 
