@@ -91,8 +91,35 @@ Repo → Settings → Environments → **New environment**: `dev`.
 |---|---|
 | 1. Provider OIDC | ✔ creado el 2026-11-20 — `arn:aws:iam::159177056493:oidc-provider/token.actions.githubusercontent.com` |
 | 2. Rol `SubDeskCiDeployRole` | ✔ **creado el 2026-11-22** vía `bootstrap-oidc-cli.sh` en CloudShell (provider existente saltado; trust `sub=repo:Pathles5/subdesk-api:environment:dev`; policy inline) — ARN: `arn:aws:iam::159177056493:role/SubDeskCiDeployRole` |
-| 3. Alerta $0 | ⏳ |
-| 4. Environment `dev` + secretos | ✔ environment y secretos creados (usuario 2026-11-20; `AWS_ACCOUNT_ID`/`AWS_REGION` guardados como secretos — elección registrada en D-45). **Pendiente: pegar el ARN del rol como `AWS_ROLE_ARN`** |
-| 5. Bot de prueba (@BotFather) | ⏳ token → secreto `TELEGRAM_BOT_TOKEN` |
+| 3. Alertas de coste | ⚠️ **parcial**: existen alertas de cuenta €3 y €10 (usuario, 2026-11-22) — útiles pero NO son la evidencia I2. Falta el **budget mensual filtrado por tag `Project=subdesk-api` con umbral €0.01** (detector del céntimo; razón: peor caso ~14 €/mes — las alertas de 3/10 € saltan tarde y sin firma de proyecto) |
+| 4. Environment `dev` + secretos | ✔ environment, secretos y **`AWS_ROLE_ARN` pegado (2026-11-22)**; pendiente solo la confirmación visual de **Required reviewers = usuario** |
+| 5. Bot de prueba (@BotFather) | ✔ token guardado en el secreto `TELEGRAM_BOT_TOKEN` (usuario 2026-11-22) |
+
+**Resumen:** pasos 1, 2, 4 (ARN) y 5 ✔. Quedan dos: **(a)** crear el budget €0.01 con filtro tag `Project=subdesk-api` (comando abajo, §3b) y **(b)** confirmación visual de Required reviewers en el environment `dev`. Con eso, "bootstrap listo" y arrancan T-04/T-05.
+
+### 3b. Budget de €0.01 filtrado por tag — la evidencia I2 que faltan tus alertas de 3/10 €
+
+Tus alertas de €3 y €10 son de **cuenta global**: saltan tarde (el peor caso de este proyecto son ~14 €/mes solo si la franquicia no aplicara, y €14 dispara la de €10 cuando ya vas dos meses desviado) y **sin firma de proyecto** (no distinguen un gasto del proyecto de uno de otro servicio). La evidencia que pide I2 es el **detector del céntimo con nombre propio**:
+
+```bash
+# 1) activa la etiqueta de coste (consola: Billing → Cost allocation tags → Project → Activate;
+#    tarda hasta 24 h en verse en el filtro del budget; es prerequisito del paso 2)
+# 2) crea el budget mensual filtrado por tag, alerta ACTUAL > 0.01 por email (sin SNS):
+aws budgets create-budget \
+  --account-id 159177056493 \
+  --budget "{
+    \"BudgetName\": \"subdesk-api-cent-detect\",
+    \"BudgetType\": \"COST\",
+    \"TimeUnit\": \"MONTHLY\",
+    \"CostFilters\": { \"Tag\": [ \"project/subdesk-api\" ] },
+    \"BudgetLimit\": { \"Amount\": \"0.01\", \"Unit\": \"EUR\" }
+  }" \
+  --notifications-with-subscribers "[{
+    \"Notification\": { \"NotificationType\": \"ACTUAL\", \"ComparisonOperator\": \"GREATER_THAN\", \"Threshold\": 0.01, \"ThresholdType\": \"PERCENTAGE\" },
+    \"Subscribers\": [ { \"SubscriptionType\": \"EMAIL\", \"Address\": \"TU_EMAIL\" } ]
+  }]"
+```
+
+(El filtro de tag en Budgets usa la clave en minúscula `project/subdesk-api`. Si prefieres umbral absoluto en lugar de porcentaje, pon `\"ThresholdType\": \"ABSOLUTE\"` y `\"Threshold\": 0.01`.) **Requisito para que el filtro vea el gasto Lambda**: el `template.yaml` debe etiquetar la Lambda con `Project=subdesk-api` además de la tabla — se lo pido al devops en T-04 para que el budget no sea inyectivo. Mientras la etiqueta no esté activada, el presupuesto existe pero no filtra: por eso **la alerta de céntimo real llega tras el primer deploy**, no antes — y la de 3/10 € de cuenta global sigue cubriendo el intervalo como red gruesa. No hay forma de poner la alerta perfecta antes de que el tag exista: lo honesto es dejarlo documentado, no fingir que está.
 
 Cuando el paso 1–4 esté hecho, dime "bootstrap listo" y el orquestador: (a) verifica por lectura, (b) despacha T-04/T-05/T-06 (workflows + scripts + asserts), (c) te propone el push del workflow y el primer deploy lo apruebas tú **en la pestaña Actions** del PR/merge. Nada más toca AWS desde esta máquina: ni ahora ni después.
