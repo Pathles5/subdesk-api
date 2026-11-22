@@ -96,10 +96,16 @@ jobs:
         # stack record, describe-stacks errors and the query yields nothing: that
         # absence IS DELETE_COMPLETE (CFN keeps deleted records ~500 days only via
         # history, not via describe-stacks).
-        # KNOWN GAP (reported, not hacked around): the policy currently lacks
-        # logs:DeleteLogGroup, so the stack's API log group deletion can fail with
-        # AccessDenied -> DELETE_FAILED. The fix belongs to the user's bootstrap
-        # (re-run bootstrap-oidc-cli.sh with the amended policy), not here.
+        # GAP HISTORY (closed and verified — this replaced a "KNOWN GAP" note): the
+        # live policy once lacked logs:DeleteLogGroup, so deleting the stack's API
+        # log group could fail AccessDenied -> DELETE_FAILED. That gap was real, was
+        # closed in the audited A-03.3 policy and IS APPLIED IN AWS since today
+        # (aws iam put-role-policy under the user's one-off authorization D-49; the
+        # live LogsScoped sid re-read after the put carries logs:DeleteLogGroup over
+        # log-group:/aws/lambda/TicketApiFunction*, and the simulate-principal-policy
+        # pre-flight returned 22/22 allowed). A log-group DELETE_FAILED is therefore
+        # NO LONGER expected here: if one ever appears it is a regression (policy
+        # drift since D-49) to investigate, NOT a known gap to re-fix via bootstrap.
         run: |
           set -uo pipefail
           aws cloudformation delete-stack --stack-name subdesk-api-dev --region us-east-1
@@ -115,7 +121,8 @@ jobs:
             case "$STATUS" in
               *FAILED*)
                 echo "Aborting: stack status $STATUS. Inspect the CFN events; a stuck" >&2
-                echo "resource (log group?) needs the bootstrap policy fix, not a retry." >&2
+                echo "resource (log group?) means policy drift since D-49 — investigate," >&2
+                echo "do not blind-retry and do not assume the bootstrap is unfixed." >&2
                 exit 1
                 ;;
             esac

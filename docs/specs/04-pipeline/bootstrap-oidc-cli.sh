@@ -11,6 +11,12 @@ set -euo pipefail
 # ============================= EDITAR =============================
 ACCOUNT_ID="159177056493"                                  # tu cuenta (la del provider)
 GITHUB_ORG_REPO="Pathles5/subdesk-api"                    # owner/repo (cuenta personal: el usuario = "org")
+# A-05/D-50: el claim OIDC que AWS evalua es el INMUTABLE (repo creado 2026-11-17, post 2026-07-15).
+# Estos dos IDs numericos NO son un adorno: son la identidad. Se leen SIEMPRE del endpoint oficial
+# antes de montar ningun trust nuevo:
+#   gh api "repos/Pathles5/subdesk-api/actions/oidc/customization/sub" --jq .sub_claim_prefix
+#   => repo:Pathles5@43617338/subdesk-api@1462037116   (use_immutable_subject: true)
+GITHUB_SUB_PREFIX="Pathles5@43617338/subdesk-api@1462037116"   # owner@OWNER_ID/repo@REPO_ID
 GITHUB_ENVIRONMENT="dev"                                  # environment de GitHub: scope de secretos + claim OIDC (D-45 nombre; D-48: SIN required reviewers, el visto es el push)
 REGION="us-east-1"
 # ===================================================================
@@ -50,6 +56,18 @@ else
 fi
 
 # ---- 2) Trust policy (el candado D-43/D-45: solo ESTE repo + ESTE environment) ----
+# A-05/D-50 (2026-11-22): the claim MUST be the IMMUTABLE form. This repo was created
+# 2026-11-17, i.e. after 2026-07-15, so GitHub mints sub = repo:OWNER@OWNER_ID/REPO@REPO_ID:…
+# (verified three ways: CloudTrail AccessDenied events show the presented subject; gh api
+# /repos/Pathles5/subdesk-api/actions/oidc/customization/sub returns
+# sub_claim_prefix=repo:Pathles5@43617338/subdesk-api@1462037116 with use_immutable_subject=true;
+# and the official aws-actions/configure-aws-credentials README states that a legacy name-only
+# sub against an immutable-claim repo fails with exactly "Not authorized to perform
+# sts:AssumeRoleWithWebIdentity"). Keeping the legacy value here is what kept runs #2 and #3 red.
+# Deliberately NO wildcard and NO legacy variant: the pinned IDs are permanent, so this is both
+# tighter than the "repo:OWNER@*/REPO@*" pattern seen in the wild and fail-closed on any change.
+# For another repo/owner, re-read the prefix instead of guessing it:
+#   gh api "repos/OWNER/REPO/actions/oidc/customization/sub" --jq .sub_claim_prefix
 TRUST="$(cat <<JSON
 {
   "Version": "2012-10-17",
@@ -61,7 +79,7 @@ TRUST="$(cat <<JSON
       "Condition": {
         "StringEquals": {
           "$ISSUER:aud": "sts.amazonaws.com",
-          "$ISSUER:sub": "repo:$GITHUB_ORG_REPO:environment:$GITHUB_ENVIRONMENT"
+          "$ISSUER:sub": "repo:$GITHUB_SUB_PREFIX:environment:$GITHUB_ENVIRONMENT"
         }
       }
     }

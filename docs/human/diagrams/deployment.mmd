@@ -5,6 +5,8 @@
 %% Modelo de visto D-48 / spec 04 A-03: NO hay aprobacion manual en Actions (environment dev
 %% sin required reviewers) — el visto es la accion que arranca el workflow. El candado es la
 %% politica de ramas (solo main, can_admins_bypass false) + el claim OIDC del trust (D-43).
+%% D-50/A-05: el claim del nudo ENVID es la forma INMUTABLE (repo creado 2026-11-17); el
+%% .svg exportado debe regenerarse con `pnpm run docs:diagrams` para reflejar esta linea.
 flowchart LR
     subgraph dev["Desarrollo (local)"]
         REPO["repo git<br/>src/ + template.yaml"]
@@ -15,7 +17,7 @@ flowchart LR
 
     subgraph ci["GitHub Actions — pipeline (Fase 04; D-42: unico ejecutor de AWS)"]
         Wf["deploy.yml<br/>verify → package<br/>compuertas + ZIP determinista<br/>nodeLinker hoisted (D-31)"]
-        ENVID["environment: dev<br/>scope de secretos + claim OIDC<br/>sub = repo:Pathles5/subdesk-api:environment:dev"]
+        ENVID["environment: dev<br/>scope de secretos + claim OIDC<br/>sub = repo:Pathles5@43617338/subdesk-api@1462037116:environment:dev (INMUTABLE, D-50)"]
         SECRETS["Secretos del environment<br/>TELEGRAM_BOT_TOKEN · ADMIN_API_KEY<br/>TELEGRAM_WEBHOOK_SECRET"]
     end
 

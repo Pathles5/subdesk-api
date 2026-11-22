@@ -296,10 +296,11 @@ if (Test-Path $workflowDir) {
         # D-42/D-43/D-48: every job that can change AWS state MUST run inside a GitHub environment.
         # Since D-48 that environment is NOT a human-approval gate (the user decided NO required
         # reviewers): a job-level `environment:` is what (a) scopes the app secrets (spec 04 §5.4) and
-        # (b) mints the OIDC `sub` claim `repo:<repo>:environment:<name>` that the trust of
-        # SubDeskCiDeployRole demands via StringEquals - without it there are simply no AWS
-        # credentials, so the invariant is still fail-closed. Checked PER JOB: a file-level match
-        # elsewhere would prove nothing (the pre-D-48 assert only grepped the whole file).
+        # (b) mints the OIDC `sub` claim that the trust of SubDeskCiDeployRole demands via
+        # StringEquals. Since D-50 the claim this repo emits is the IMMUTABLE form
+        # (repo:OWNER@OWNER_ID/REPO@REPO_ID:environment:dev) - without the job environment there are
+        # simply no AWS credentials, so the invariant is still fail-closed. Checked PER JOB: a
+        # file-level match elsewhere would prove nothing (the pre-D-48 assert only grepped the file).
         $awsMutate = "(?i)(sam\s+deploy|sam\s+package|sam\s+delete|create-change-set|execute-change-set|delete-stack|cloudformation\s+deploy)"
         foreach ($jb in (Get-JobBlocks $wRaw)) {
             if ($jb.Body -match $awsMutate) {
@@ -307,13 +308,72 @@ if (Test-Path $workflowDir) {
                     Add-Fail ("{0}: job '{1}' mutates AWS state without a job-level 'environment:' - the OIDC claim binding and secret scope (spec 04 §5.1/§5.4, D-42/D-43/D-48) would be lost." -f $w.Name, $jb.Id)
                 }
             }
+            # D-31, re-anchored 2026-11-22: the previous form was '(?i)^\s*...sam\s+build\b' matched
+            # with -match, and in .NET '^' without (?m) anchors ONLY at the start of the whole file -
+            # so the assert could never fire on a real workflow and had silently rotted. Detection is
+            # now per job and per COMMAND: step names and comments legitimately contain the words
+            # "sam build" precisely to state that it is not used ("no sam build is ever invoked"),
+            # so key lines (name/description/label/id) are excluded before matching.
+            $cmdText = (($jb.Body -split "`r?`n") | Where-Object { $_ -notmatch '^\s*(-\s+)?(name|description|label|id)\s*:' }) -join "`n"
+            if ($cmdText -match "(?i)\bsam\s+build\b") {
+                Add-Fail ("{0}: job '{1}' invokes 'sam build' - forbidden in CI and gates (D-31); packaging is scripts/package-lambda.mjs staging." -f $w.Name, $jb.Id)
+            }
         }
-        # D-31: sam build stays out of every pipeline (executes package-manager scripts).
-        if ($wRaw -match "(?i)^\s*(.*\b)?sam\s+build\b") {
-            Add-Fail ("{0}: 'sam build' detected - forbidden in CI and gates (D-31); packaging is scripts/package-lambda.mjs staging." -f $w.Name)
-        }
+        # D-31 moved into the per-job command check above (it was unmatchable where it stood).
     }
     Add-Note "Workflows found: $($workflows.Count)."
+}
+
+# --- OIDC trust audit (D-50/A-05): both audited copies must pin the IMMUTABLE sub claim ---
+# GitHub mints immutable subject claims (repo:OWNER@OWNER_ID/REPO@REPO_ID:...) for repositories
+# created, renamed or transferred after 2026-07-15. A trust policy written in the legacy name-only
+# form then fails with "Not authorized to perform sts:AssumeRoleWithWebIdentity" - which is exactly
+# what cost runs #2 and #3 of Fase 04, because the two audited copies of the trust JSON (the CLI
+# script and bootstrap-oidc.md) both carried the legacy value. This assert keeps them honest:
+#   1. the script must declare GITHUB_SUB_PREFIX in immutable form and build the trust from it;
+#   2. the script must NOT build the sub condition from the legacy owner/repo variable;
+#   3. the audited JSON in bootstrap-oidc.md must contain the SAME concrete value the script yields.
+$bootstrapSh = Join-Path $RepoRoot "docs/specs/04-pipeline/bootstrap-oidc-cli.sh"
+$bootstrapMd = Join-Path $RepoRoot "docs/specs/04-pipeline/bootstrap-oidc.md"
+if ((Test-Path $bootstrapSh) -and (Test-Path $bootstrapMd)) {
+    $shRaw = Get-Content $bootstrapSh -Raw -Encoding UTF8
+    $mdRaw = Get-Content $bootstrapMd -Raw -Encoding UTF8
+    $prefixMatch = [regex]::Match($shRaw, '(?m)^GITHUB_SUB_PREFIX="([^"/]+@[0-9]+/[^"/]+@[0-9]+)"')
+    $envMatch = [regex]::Match($shRaw, '(?m)^GITHUB_ENVIRONMENT="([^"]+)"')
+    $legacyMatch = [regex]::Match($shRaw, '(?m)^GITHUB_ORG_REPO="([^"]+)"')
+    if (-not $prefixMatch.Success) {
+        Add-Fail "OIDC trust: bootstrap-oidc-cli.sh lacks GITHUB_SUB_PREFIX in immutable form (owner@OWNER_ID/repo@REPO_ID). Since D-50 a legacy name-only sub does not match the claim GitHub mints for this repo."
+    } elseif (-not $envMatch.Success) {
+        Add-Fail "OIDC trust: bootstrap-oidc-cli.sh lacks GITHUB_ENVIRONMENT - the sub condition cannot be audited."
+    } else {
+        $prefix = $prefixMatch.Groups[1].Value
+        $envName = $envMatch.Groups[1].Value
+        $immutableSub = "repo:${prefix}:environment:${envName}"
+        # (1) the trust heredoc must compose sub from the immutable prefix.
+        $shNeedle = '"$ISSUER:sub": "repo:$GITHUB_SUB_PREFIX:environment:$GITHUB_ENVIRONMENT"'
+        if (-not $shRaw.Contains($shNeedle)) {
+            Add-Fail ("OIDC trust: the sub condition in bootstrap-oidc-cli.sh is not built from GITHUB_SUB_PREFIX - expected the literal {0}." -f $shNeedle)
+        }
+        # (2) and must not be the legacy variable form (the regression that broke runs #2/#3).
+        if ($shRaw.Contains('"$ISSUER:sub": "repo:$GITHUB_ORG_REPO')) {
+            Add-Fail "OIDC trust: bootstrap-oidc-cli.sh pins the LEGACY name-only sub claim (repo:$($legacyMatch.Groups[1].Value):...). That never matches an immutable-claim repo (D-50)."
+        }
+        # (3) the audited JSON copies must agree with the script, byte for byte on this value.
+        # Only JSON-key occurrences count (`...:sub": "<value>"`): prose that QUOTES the legacy
+        # form in order to declare it wrong is legitimate documentation, not a second source of truth.
+        if (-not $mdRaw.Contains($immutableSub)) {
+            Add-Fail ("OIDC trust: bootstrap-oidc.md does not carry the sub claim the script produces ({0}) - the two audited copies diverged." -f $immutableSub)
+        }
+        $auditedDiverged = @()
+        foreach ($mm in [regex]::Matches($mdRaw, '"token\.actions\.githubusercontent\.com:sub":\s*"([^"]+)"')) {
+            if ($mm.Groups[1].Value -ne $immutableSub) { $auditedDiverged += $mm.Groups[1].Value }
+        }
+        if ($auditedDiverged.Count -gt 0) {
+            $divergentList = ($auditedDiverged | Sort-Object -Unique | Select-Object -First 2) -join ', '
+            Add-Fail ("OIDC trust: bootstrap-oidc.md audits a sub value that is not the script's (" + $divergentList + ") - the two audited copies diverged (D-50).")
+        }
+        Add-Note ("OIDC trust: immutable sub pinned in both audited copies ({0})." -f $immutableSub)
+    }
 }
 
 # --- Secret hygiene scan (D-13 / I4) ---

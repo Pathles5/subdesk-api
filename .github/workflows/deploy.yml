@@ -249,11 +249,16 @@ jobs:
 
       - name: Tag the artifacts bucket (cost visibility — needs s3:PutBucketTagging)
         # The user's cost-by-tag request (Fase 04): Project/Stack on the bucket too.
-        # KNOWN GAP: s3:PutBucketTagging is NOT yet in SubDeskCiDeployPolicy, so this
-        # step is expected to show AccessDenied until the user re-runs the bootstrap
-        # script with the amended policy. It blocks nothing: the bucket holds a few
-        # MB of non-billable-relevant artifacts, and every billable resource in the
-        # stack is already tagged (template.yaml). continue-on-error is deliberate.
+        # s3:PutBucketTagging IS GRANTED in the live SubDeskCiDeployPolicy since the
+        # A-03.3 audited version was applied in AWS under D-49 (SAMArtifactBucket sid
+        # re-read after the put-role-policy; simulate-principal-policy 22/22 allowed),
+        # so this step is NO LONGER expected to show AccessDenied — if it ever does,
+        # that is a policy-drift regression, not a known gap. continue-on-error: true
+        # stays deliberately until this step is seen SUCCEED once in a real deploy:
+        # the flag no longer masks a foreseen failure, it only keeps a first-run
+        # cosmetic tagging error from blocking the stack while that one-bit evidence
+        # is collected. Removing the flag is the next hardening step once confirmed
+        # (recorded as an F09 pending in spec A-03; do not drop it here instead).
         continue-on-error: true
         run: |
           aws s3api put-bucket-tagging \
