@@ -95,6 +95,8 @@ sam deploy --template-file packaged.yaml --stack-name <NOMBRE_DEL_STACK> --regio
 ## 2.7 Identidad y secretos de la pipeline — guía de bootstrap (D-43; replicable a un cliente nuevo)
 
 > **Esta es la guía canónica.** El JSON completo está en `docs/specs/04-pipeline/bootstrap-oidc.md`; aquí se fija *qué* se crea, *dónde* vive cada valor y *qué se cambia* al llevar el proyecto a otra cuenta (la del cliente). El bootstrap lo ejecuta **solo un humano con permisos de IAM en la consola AWS** + admin del repo en GitHub: la pipeline no puede crearse a sí misma (huevo-gallina). Coste: $0.
+>
+> **Vía CLI (recomendada si el wizard de consola complica — pregunta "organization", pide GitHub App, etc.):** `docs/specs/04-pipeline/bootstrap-oidc-cli.sh` — script idempotente (provider si falta + trust con la condición environment-exacta + policy inline), con las 4 variables de entorno de destino arriba (cuenta, owner/repo, environment, región). Imprime al final el `AWS_ROLE_ARN` listo para pegar en el environment de GitHub. La ruta de consola de abajo queda documentada como alternativa equivalente.
 
 ### A) Pasos (orden y qué se verifica al terminar)
 
