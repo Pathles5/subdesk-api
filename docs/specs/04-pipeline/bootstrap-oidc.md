@@ -115,11 +115,11 @@ aws budgets create-budget \
     \"BudgetLimit\": { \"Amount\": \"0.01\", \"Unit\": \"EUR\" }
   }" \
   --notifications-with-subscribers "[{
-    \"Notification\": { \"NotificationType\": \"ACTUAL\", \"ComparisonOperator\": \"GREATER_THAN\", \"Threshold\": 0.01, \"ThresholdType\": \"ABSOLUTE\" },
+    \"Notification\": { \"NotificationType\": \"ACTUAL\", \"ComparisonOperator\": \"GREATER_THAN\", \"Threshold\": 0.01, \"ThresholdType\": \"ABSOLUTE_VALUE\" },
     \"Subscribers\": [ { \"SubscriptionType\": \"EMAIL\", \"Address\": \"TU_EMAIL\" } ]
   }]"
 ```
 
-**Campos que la API exige literalmente (verificado en vivo 2026-11-22):** en `Subscribers[]` el email va en **`Address`**, no `EmailAddress` (el error `Unknown parameter ... must be one of: SubscriptionType, Address` lo aclara). Y `ThresholdType` admite `PERCENTAGE` o `ABSOLUTE` — para el detector del céntimo usamos **`ABSOLUTE` 0.01 EUR** (PERCENTAGE 0.01 significaría "1 % del límite", otra cosa). En **Windows PowerShell** el literal `'{...}'` llega a `aws.exe` sin comillas dobles (PS 5.1 las destruye al invocar nativos) — pasar los JSON por ficheros `file:///$env:TEMP/budget.json`; en **CloudShell/bash** el comando funciona tal cual y es la vía recomendada también para re-ejecutar `bootstrap-oidc-cli.sh`.
+**Campos que la API exige literalmente (verificado en vivo 2026-11-22, dos vueltas):** en `Subscribers[]` el email va en **`Address`**, no `EmailAddress`; y `ThresholdType` admite el enum **`FORECASTED_BREACH_IN_DAYS | ABSOLUTE_VALUE | PERCENTAGE`** — para el detector del céntimo es **`ABSOLUTE_VALUE`** con `Threshold: 0.01` (PERCENTAGE 0.01 sería "1 % del límite", otra cosa). En **Windows PowerShell** el literal `'{...}'` llega a `aws.exe` sin comillas dobles (PS 5.1 las destruye al invocar nativos) — pasar los JSON por ficheros `file:///$env:TEMP/budget.json`; en **CloudShell/bash** el comando funciona tal cual y es la vía recomendada también para re-ejecutar `bootstrap-oidc-cli.sh`.
 
 Cuando el paso 1–4 esté hecho, dime "bootstrap listo" y el orquestador: (a) verifica por lectura, (b) despacha T-04/T-05/T-06 (workflows + scripts + asserts), (c) te propone el push del workflow y el primer deploy lo apruebas tú **en la pestaña Actions** del PR/merge. Nada más toca AWS desde esta máquina: ni ahora ni después.
