@@ -1,10 +1,12 @@
 %% deployment.mmd — despliegue SubDesk API: del repo a los recursos reales del template.yaml
-%% Actualizado: fase 04 · 2026-11-22 (tanda D-52/D-54/D-55: nudos preflight-parameters y
-%% load-deploy-config en el orden real del job deploy; etiqueta de region eu-west-1;
-%% nudo OIDC al dia: T-17 done / D-55).
+%% Actualizado: fase 04 · 2026-11-22 (tanda run #5: etiqueta PREFLIGHT con la evidencia real —
+%% el gate aborto el run 45044899842 con cero credenciales y cero llamadas AWS; tanda anterior
+%% D-52/D-54/D-55: nudos preflight-parameters y load-deploy-config en el orden real del job
+%% deploy; etiqueta de region eu-west-1; nudo OIDC al dia: T-17 done / D-55).
 %% Fuente versionada; el .svg se regenera con `pnpm run docs:diagrams` (D-33/D-41, local, sin CDN).
-%% Estado del derivado: .svg CREADO Y REGENERADO por el orquestador (2026-11-22 16:50, 226.324 B;
-%% component.svg re-exportado en la misma corrida). Nada pendiente de export en esta fuente.
+%% Estado del derivado: ultimo export del orquestador 2026-11-22 16:50:16, 226.324 B; la fuente
+%% cambio despues (esta etiqueta del run #5) ⇒ RE-EXPORT PENDIENTE por el orquestador con
+%% `pnpm run docs:diagrams` al cierre de la tanda.
 %% Coherente con template.yaml A-01 (Fase 03): 7 recursos. Region del destino: eu-west-1,
 %% declarada UNA sola vez en infra/deployment.env y cargada por load-deploy-config (D-54 / A-07);
 %% el template es region-agnóstico por diseño (!Sub ${AWS::Region}) — cero literales en el IaC.
@@ -24,7 +26,7 @@ flowchart LR
 
     subgraph ci["GitHub Actions — pipeline (Fase 04; D-42: unico ejecutor de AWS)"]
         Wf["deploy.yml<br/>verify → package<br/>compuertas + ZIP determinista<br/>nodeLinker hoisted (D-31)"]
-        PREFLIGHT["preflight-parameters (D-52 / A-06)<br/>primer paso ejecutable del job deploy<br/>AllowedPattern leidos del propio template.yaml<br/>aborta con exit!=0: CERO contacto con AWS<br/>nunca imprime valor, longitud ni hash (I4)"]
+        PREFLIGHT["preflight-parameters (D-52 / A-06)<br/>primer paso ejecutable del job deploy<br/>AllowedPattern leidos del propio template.yaml<br/>aborta con exit!=0: CERO contacto con AWS<br/>nunca imprime valor, longitud ni hash (I4)<br/>PROBADO EN EL RUN #5 (45044899842): aborto real,<br/>cero credenciales minteadas, cero llamadas AWS"]
         LOADCFG["load-deploy-config (D-54 / A-07)<br/>fuente unica infra/deployment.env<br/>AWS_REGION=eu-west-1 · STACK_NAME · ARTIFACTS_BUCKET(-euwest1)<br/>despues del pre-vuelo, antes del OIDC"]
         ENVID["environment: dev<br/>scope de secretos + claim OIDC<br/>sub = repo:Pathles5@43617338/subdesk-api@1462037116:environment:dev (INMUTABLE, D-50)"]
         SECRETS["Secretos del environment<br/>TELEGRAM_BOT_TOKEN · ADMIN_API_KEY<br/>TELEGRAM_WEBHOOK_SECRET"]

@@ -165,6 +165,14 @@ fi
 #                                      object; the verified artifact is 856 KB (F03 spike D-31). NOTE
 #                                      for F09: if prod deps ever push the ZIP past 8 MB, grant it or
 #                                      fail the package-lambda size assert first.
+#   * CloudFormationTransform (ANADIDO tras el run #6, 2026-11-22): un template con
+#     `Transform: AWS::Serverless-2016-10-31` hace que CreateChangeSet resuelva el macro SAM, que es
+#     un RECURSO APARTE propiedad de la cuenta `aws`, no de la nuestra:
+#     arn:aws:cloudformation:<region>:aws:transform/Serverless-2016-10-31
+#     El run #6 murio ahi ("is not authorized to perform cloudformation:CreateChangeSet on resource
+#     arn:aws:cloudformation:eu-west-1:aws:transform/Serverless-2016-10-31"), DESPUES de que el
+#     bucket, el tagging y `sam package` pasaran en verde. Concederlo solo sobre el ARN del stack no
+#     basta, y ningun simulate-principal-policy sobre nuestros propios ARNs lo habria revelado.
 #   iam:PassRole keeps iam:PassedToService = lambda.amazonaws.com (the live policy of run #2 predated
 #                                      this line; re-running step 2/3 restores it).
 POLICY="$(cat <<JSON
@@ -172,6 +180,7 @@ POLICY="$(cat <<JSON
   "Version": "2012-10-17",
   "Statement": [
     { "Sid": "CloudFormation", "Effect": "Allow", "Action": ["cloudformation:CreateChangeSet","cloudformation:DescribeChangeSet","cloudformation:ExecuteChangeSet","cloudformation:DescribeStacks","cloudformation:DescribeStackEvents","cloudformation:GetTemplateSummary","cloudformation:DeleteStack"], "Resource": "arn:aws:cloudformation:$REGION:$ACCOUNT_ID:stack/$STACK_NAME/*" },
+    { "Sid": "CloudFormationTransform", "Effect": "Allow", "Action": ["cloudformation:CreateChangeSet"], "Resource": "arn:aws:cloudformation:$REGION:aws:transform/Serverless-2016-10-31" },
     { "Sid": "SAMArtifactBucket", "Effect": "Allow", "Action": ["s3:CreateBucket","s3:PutObject","s3:GetObject","s3:ListBucket","s3:PutEncryptionConfiguration","s3:PutLifecycleConfiguration","s3:PutBucketTagging"], "Resource": ["arn:aws:s3:::aws-sam-cli-managed-*", "arn:aws:s3:::aws-sam-cli-managed-*/*"] },
     { "Sid": "LambdaScoped", "Effect": "Allow", "Action": ["lambda:CreateFunction","lambda:GetFunction","lambda:UpdateFunctionCode","lambda:UpdateFunctionConfiguration","lambda:DeleteFunction","lambda:GetFunctionConfiguration","lambda:ListVersionsByFunction","lambda:TagResource","lambda:ListTags"], "Resource": "arn:aws:lambda:$REGION:$ACCOUNT_ID:function:TicketApiFunction" },
     { "Sid": "FunctionUrlScoped", "Effect": "Allow", "Action": ["lambda:CreateFunctionUrlConfig","lambda:GetFunctionUrlConfig","lambda:UpdateFunctionUrlConfig","lambda:DeleteFunctionUrlConfig","lambda:AddPermission","lambda:RemovePermission"], "Resource": "arn:aws:lambda:$REGION:$ACCOUNT_ID:function:TicketApiFunction" },

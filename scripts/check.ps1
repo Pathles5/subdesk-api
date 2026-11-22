@@ -491,6 +491,42 @@ if ($cfnFiles.Count -gt 0) {
         Add-Note "IaC: SAM transform not detected in the scanned files (expected if using SAM syntax)."
     }
     if ($iacRaw -match 'arn:aws:iam::\*|Resource:\s*"?\*"') { Add-Fail "IaC asserts: wildcard IAM resource/policy detected (I4 least privilege)." }
+    # --- Lambda Permission shape asserts (2026-11-22, run 45044899842 attempt 4) --------------
+    # CFN's own schema is too permissive to catch this class of bug: Action accepts any
+    # `lambda:[a-zA-Z]+` and Principal is a free String, so `Principal: AWS:UrlInvoke` with
+    # `Action: lambda:CreateFunctionUrlConfig` passed cfn-lint 1.61.0 and only exploded at
+    # CREATE time, when Lambda validated the principal against `[\w+=,.@-]*` and rejected the
+    # colon. These asserts move that validation into the local gate.
+    $principalShapes = @(
+        '^\*$',                                              # public (only valid with FunctionUrlAuthType NONE)
+        '^\d{12}$',                                          # another AWS account
+        '^[a-z0-9][a-z0-9.-]*\.amazonaws\.com$',             # service principal (domain style)
+        '^arn:aws[a-zA-Z-]*:iam::\d{12}:(root|user|role|assumed-role)/.+$'  # IAM identity ARN
+    )
+    # NOTE: `[ \t]*`, never `\s*` — in .NET `\s` also matches newlines, so `Principal:\s*(.*)`
+    # happily swallowed the line break and captured the NEXT line ("Service: lambda.amazonaws.com")
+    # as if it were the principal value. Same family of bug as the `^`-without-(?m) one in D-50, and
+    # caught the same way: by running the assert against a fixture instead of trusting it.
+    foreach ($pm in [regex]::Matches($iacRaw, '(?m)^[ \t]*(?:-[ \t]+)?(Principal|AWS|Federated|Service)[ \t]*:[ \t]*(.*)$')) {
+        $val = $pm.Groups[2].Value.Trim().Trim('"').Trim("'")
+        if ($val -eq '' -or $val -match '^(Ref|Fn::|!)') { continue }   # mapping form or intrinsic
+        $ok = $false
+        foreach ($shape in $principalShapes) { if ($val -match $shape) { $ok = $true; break } }
+        if (-not $ok) {
+            Add-Fail ("IaC asserts: principal '{0}' is not a shape Lambda accepts (public '*', 12-digit account, *.amazonaws.com service, or an IAM ARN). CFN does not validate this; Lambda rejects it at CREATE time." -f $val)
+        }
+    }
+    # Coupling: a public Function URL (AuthType NONE) is only callable if some Permission grants
+    # lambda:InvokeFunctionUrl bound to that auth type. Missing either half yields a URL that
+    # answers 403, which is far harder to diagnose than a failed stack.
+    if ($iacRaw -match '(?m)^\s*Type:\s*AWS::Lambda::Url' -and $iacRaw -match '(?m)^\s*AuthType:\s*NONE') {
+        if ($iacRaw -notmatch 'lambda:InvokeFunctionUrl') {
+            Add-Fail "IaC asserts: AWS::Lambda::Url with AuthType NONE but no 'lambda:InvokeFunctionUrl' permission - the public endpoint would not be invocable (AWS docs: Public Function URL Invoke)."
+        }
+        if ($iacRaw -notmatch "(?m)^\s*FunctionUrlAuthType:\s*'?NONE'?") {
+            Add-Fail "IaC asserts: AWS::Lambda::Url with AuthType NONE but the Permission lacks FunctionUrlAuthType 'NONE' - the permission would not apply to URL invocations."
+        }
+    }
     # Single-region rule (I7) - REWRITTEN 2026-11-22 for D-54: the expected region is NO LONGER a
     # literal inside this script. It is read from infra/deployment.env, the single source of truth of
     # the deployment target, and every other region literal in the repo's executable artefacts (IaC,

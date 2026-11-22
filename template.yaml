@@ -240,17 +240,42 @@ Resources:
   TicketApiUrlInvokePermission:
     Type: AWS::Lambda::Permission
     Properties:
-      # AuthType: NONE needs this statement for the URL to be callable: it lets
-      # the AWS URL service (AWS:UrlInvoke) bind a public invoke config to OUR
-      # function only. Least privilege comes from FunctionName pinning exactly
-      # one function ARN: AWS::Lambda::Permission admits no Condition, and the
-      # SourceArn of a URL carries a runtime-generated config id, so it cannot
-      # be referenced statically without a cycle. (With SAM's FunctionUrlConfig
-      # the transform injects the equivalent statement implicitly; declared
-      # here explicitly, same effect, auditable.)
-      Action: 'lambda:CreateFunctionUrlConfig'
+      # Public unauthenticated Function URL (AuthType: NONE — D-27) needs this
+      # statement to be callable. The documented shape is the CFN
+      # AWS::Lambda::Permission reference, canonical example "Public Function
+      # URL Invoke": Action lambda:InvokeFunctionUrl + Principal '*' +
+      # FunctionUrlAuthType NONE.
+      # (i) There is no "AWS URL service" principal: the previous
+      #     `Principal: AWS:UrlInvoke` does not exist. A public URL permission
+      #     is granted to '*' scoped by FunctionUrlAuthType: NONE — that pairing
+      #     is how AWS documents an unauthenticated public endpoint (D-27).
+      #     Real least-privilege scope comes from FunctionName pinned to
+      #     exactly one function ARN (AWS::Lambda::Permission admits no
+      #     Condition, and a URL's SourceArn carries a runtime-generated config
+      #     id that cannot be referenced statically without a cycle).
+      # (ii) Action must be lambda:InvokeFunctionUrl (invoke via URL). The
+      #     previous lambda:CreateFunctionUrlConfig is the action for CREATING
+      #     the URL config, which the TicketApiUrlConfig resource
+      #     (AWS::Lambda::Url) already performs; this statement grants
+      #     invocation, not provisioning.
+      # (iii) Evidence of the real failure (run 45044899842, attempt 4,
+      #     2026-11-22T20:00:05Z): Lambda returned CREATE_FAILED — "The
+      #     provided input 'AWS:UrlInvoke' was invalid. Member must satisfy
+      #     expression: [\w+=,.@-]*" (Status 400, HandlerErrorCode
+      #     InvalidRequest; the colons break the expression). Full rollback,
+      #     four resources DELETE_COMPLETE, zero live resources, $0. cfn-lint
+      #     could NOT catch this: the CFN Action pattern
+      #     ^(lambda:[*]|lambda:[a-zA-Z]+|[*])$ accepts any lambda:<word>, and
+      #     Principal is a free String in the template — Lambda validates it
+      #     server-side at creation time.
+      # (iv) Deliberately NOT migrated to AWS::Lambda::ResourcePolicy (the form
+      #     the CFN docs recommend) right now: mixing a resource-model change
+      #     with the first stack would muddy the evidence. Registered as an
+      #     F09 hardening candidate.
+      Action: lambda:InvokeFunctionUrl
       FunctionName: !GetAtt TicketApiFunction.Arn
-      Principal: AWS:UrlInvoke
+      FunctionUrlAuthType: 'NONE'
+      Principal: '*'
       # AWS::Lambda::Permission admits no Tags property (schema has none); the
       # statement is not a billable resource either, so it stays outside the
       # cost-allocation tag set. Its cost story is carried by the tagged function.
