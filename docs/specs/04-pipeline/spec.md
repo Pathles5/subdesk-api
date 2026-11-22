@@ -80,4 +80,4 @@ Que AWS solo se toque desde GitHub Actions, para siempre:
 
 ## 8. Amendments
 
-(ninguna aún)
+- **A-01 · 2026-11-22 (run #1 fallido en 0 s — hallazgo del push de T-07)** — El primer `deploy.yml` ejecutado en GitHub falló ANTES de cualquier job: `deploy.yml:300 y :327` contenían `": "` dentro de nombres de paso sin comillas (el mismo tipo de YAML inválido que la reparación A-01 de la Fase 01 dejó por escrito para el contrato). Ningún assert nuestro parseaba workflows: **hueco real de compuerta, cerrado en el mismo commit del fix** con `tests/pipeline/workflows-syntax.test.js` (29/27→29/29; parsea todos los `.github/workflows/*.yml` + `pnpm-workspace.yaml`). Correcciones menores colaterales registradas: las herramientas locales del usuario (aws CLI, SAM, gh) existen pero NO en el PATH del proceso huésped de esta sesión (instálense o actualícense tras su arranque) — rutas y workaround en `operations.md`. Run #2 (este push) debe: verify ✓ → package ✓ → deploy en *Waiting* (gate de aprobación humano, D-42 — es el resultado esperado y la evidencia C1).

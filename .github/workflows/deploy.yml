@@ -297,7 +297,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Setup Node 22 (smoke-live.mjs is zero-dependency: node:fs + global fetch)
+      - name: Setup Node 22 for smoke-live.mjs (zero-dependency script)
         uses: actions/setup-node@v4
         with:
           node-version: '22'
@@ -324,7 +324,7 @@ jobs:
           fi
           echo "url=$URL" >> "$GITHUB_OUTPUT"
 
-      - name: Run scripts/smoke-live.mjs (era-stub table: 401/403/404/501/200-ignored)
+      - name: Run scripts/smoke-live.mjs (era-stub table, 401/403/404/501/200-ignored)
         env:
           FUNCTION_URL: ${{ steps.url.outputs.url }}
           ADMIN_API_KEY: ${{ secrets.ADMIN_API_KEY }}
