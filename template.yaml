@@ -92,17 +92,32 @@ Resources:
       # Pinned physical name: the log group name and the role's log-stream ARN
       # below are built from this literal, so the pairing is deterministic.
       FunctionName: TicketApiFunction
-      # Handler is ESM (package.json "type": "module"); nodejs22.x supports ESM
-      # handlers natively (D-40). Packaging (D-31/D-42, Fase 04 — staging=artifact):
+      # Handler is ESM (package.json "type": "module"); nodejs26.x supports ESM
+      # handlers natively. Runtime + architecture are the user's explicit decision
+      # D-61 (supersedes D-40): nodejs26.x is in PUBLIC PREVIEW on Lambda — AWS
+      # states preview runtimes are "not covered by the Lambda SLA or Technical
+      # Support, and should not be used for production workloads" (runtime GA was
+      # expected ~Dec 2026); the user assumes that risk verbatim. The local engine
+      # stays v22.20.0, so the old D-40 rationale (local engine == runtime, minimal
+      # dev/prod drift) no longer holds: dev/prod parity is KNOWINGLY broken and
+      # recorded as accepted drift (check.ps1 "Runtime parity" keeps the CI Node
+      # major pinned to the runtime major and engines.node admitting it). arm64
+      # (Graviton) is chosen for price/performance, coherent with I2, and is safe
+      # for this artifact: the ZIP carries zero native (.node) binaries — prod deps
+      # are express + serverless-http, pure JS (the repo's only .node file is a
+      # mermaid-cli devDep, outside the ZIP). Both properties are "Update requires:
+      # No interruption" in the CFN registry, so this is an in-place update of the
+      # pinned TicketApiFunction: no replacement, no name collision (F03 hazard D4
+      # does not apply). Packaging (D-31/D-42, Fase 04 — staging=artifact):
       # the ZIP artifact IS the staging produced by scripts/package-lambda.mjs
       # (no sam build, no gitignore filtering — D-31/I4b fail-closed asserts inside
       # the script). dist/lambda = src/ + production-trimmed package.json + flat
       # hoisted prod node_modules, zero symlinks; deploy.yml materializes it in the
       # deploy workspace and `sam package` zips THAT directory verbatim.
       Handler: src/lambda.handler
-      Runtime: nodejs22.x
+      Runtime: nodejs26.x
       Architectures:
-        - x86_64
+        - arm64
       CodeUri: dist/lambda
       MemorySize: 256
       Timeout: 30
@@ -279,6 +294,61 @@ Resources:
       # AWS::Lambda::Permission admits no Tags property (schema has none); the
       # statement is not a billable resource either, so it stays outside the
       # cost-allocation tag set. Its cost story is carried by the tagged function.
+
+  # Second half of the resource policy that AuthType: NONE requires. Authority is
+  # the Lambda developer guide (lambda/latest/dg/urls-auth.html), NOT the
+  # CloudFormation reference example used for the block above, which is stale and
+  # shows a single statement:
+  #   "Starting in October 2025, new function URLs will require both
+  #    lambda:InvokeFunctionUrl and lambda:InvokeFunction permissions."
+  #   "If a function's resource-based policy doesn't grant lambda:InvokeFunctionUrl
+  #    and lambda:InvokeFunction, users get a 403 Forbidden ... even if the function
+  #    URL uses the NONE auth type."
+  #   "When you create a function URL with auth type NONE using the console or AWS
+  #    SAM, Lambda automatically creates the resource-based policy for you. If
+  #    you're using the AWS CLI, AWS CloudFormation, or the Lambda API directly,
+  #    you must add the policy yourself." <- our exact case: the URL is declared as
+  #    the CFN-native AWS::Lambda::Url (spec 03 A-01), so nobody adds it for us.
+  # (i) Evidence of the real failure (stack subdesk-api-dev CREATE_COMPLETE, run
+  #     45065067527, commit a1980ca, URL live): every request answered
+  #     HTTP/1.1 403 Forbidden with header x-amzn-ErrorType: AccessDeniedException
+  #     and body {"Message":"Forbidden. Invoking a Function URL requires both the
+  #     lambda:InvokeFunctionUrl and lambda:InvokeFunction permissions."}
+  #     (x-amzn-RequestId 54870695-61e0-4b8b-983b-22221c0f40b8). The body is
+  #     Lambda's own, not the app's, and the log group had ZERO log streams: the
+  #     function was never invoked. `aws lambda get-policy` showed exactly one
+  #     statement (lambda:InvokeFunctionUrl) - the one above.
+  # (ii) InvokedViaFunctionUrl: true is the CFN form of the condition
+  #     `Bool lambda:InvokedViaFunctionUrl = "true"` that the guide pairs with this
+  #     statement (AWS::Lambda::Permission admits no Condition property; it exposes
+  #     this Boolean instead). It is a least-privilege requirement, not decoration:
+  #     without it, `Principal: '*'` + lambda:InvokeFunction would allow invoking
+  #     the function by ANY path (SDK Invoke, event-source mappings, other
+  #     accounts' tooling), not only through the function URL. The guide says so:
+  #     "This context key ensures that the function can only be invoked through the
+  #     function URL and not through other invocation methods."
+  # (iii) No FunctionUrlAuthType here on purpose: the guide scopes that key to the
+  #     lambda:InvokeFunctionUrl statement only, and mixing it into this one could
+  #     invalidate the condition. The two resources are additive: the block above is
+  #     byte-identical to what the live stack already has.
+  # (iv) DependsOn (below) serializes the two Permissions ON PURPOSE: both
+  #     AddPermission calls are a read-modify-write on the SAME resource policy,
+  #     and on a cold CREATE CloudFormation may issue them in parallel, which
+  #     Lambda can answer with ResourceConflictException. Serializing costs ~1 s
+  #     and changes neither topology nor cost. Not needed for the in-place UPDATE
+  #     that D-61 produces, but required for the next from-scratch create.
+  #     TicketApiUrlConfig keeps pointing only at the first Permission.
+  # Cost: AWS::Lambda::Permission bills nothing (I2 intact).
+  TicketApiUrlInvokePermissionViaUrl:
+    Type: AWS::Lambda::Permission
+    # Serialize the two AddPermission read-modify-write calls on the same
+    # resource policy — full reason in (iv) above.
+    DependsOn: TicketApiUrlInvokePermission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !GetAtt TicketApiFunction.Arn
+      Principal: '*'
+      InvokedViaFunctionUrl: true
 
 Outputs:
   FunctionUrl:

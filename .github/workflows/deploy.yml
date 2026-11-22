@@ -91,10 +91,10 @@ jobs:
       - name: Install pnpm (version comes from packageManager; I4b/D-30)
         uses: pnpm/action-setup@v4
 
-      - name: Setup Node 22 with pnpm cache
+      - name: Setup Node 26 with pnpm cache
         uses: actions/setup-node@v4
         with:
-          node-version: '22'
+          node-version: '26'
           cache: 'pnpm'
 
       # Documented debt: cfn-lint is the validate:iac gate binary and is NOT a pnpm
@@ -137,10 +137,10 @@ jobs:
       - name: Install pnpm
         uses: pnpm/action-setup@v4
 
-      - name: Setup Node 22 with pnpm cache
+      - name: Setup Node 26 with pnpm cache
         uses: actions/setup-node@v4
         with:
-          node-version: '22'
+          node-version: '26'
           cache: 'pnpm'
 
       # EXACTLY the contract of scripts/package-lambda.mjs: production-only, hoisted
@@ -441,10 +441,10 @@ jobs:
           } >> "$GITHUB_ENV"
           echo "smoke target loaded: region=$AWS_REGION stack=$STACK_NAME"
 
-      - name: Setup Node 22 for smoke-live.mjs (zero-dependency script)
+      - name: Setup Node 26 for smoke-live.mjs (zero-dependency script)
         uses: actions/setup-node@v4
         with:
-          node-version: '22'
+          node-version: '26'
 
       - name: Configure AWS credentials via OIDC (read-only describe-stacks)
         uses: aws-actions/configure-aws-credentials@v4

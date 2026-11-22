@@ -516,15 +516,70 @@ if ($cfnFiles.Count -gt 0) {
             Add-Fail ("IaC asserts: principal '{0}' is not a shape Lambda accepts (public '*', 12-digit account, *.amazonaws.com service, or an IAM ARN). CFN does not validate this; Lambda rejects it at CREATE time." -f $val)
         }
     }
-    # Coupling: a public Function URL (AuthType NONE) is only callable if some Permission grants
-    # lambda:InvokeFunctionUrl bound to that auth type. Missing either half yields a URL that
-    # answers 403, which is far harder to diagnose than a failed stack.
-    if ($iacRaw -match '(?m)^\s*Type:\s*AWS::Lambda::Url' -and $iacRaw -match '(?m)^\s*AuthType:\s*NONE') {
+    # Coupling: a public Function URL (AuthType NONE) is only invocable if the resource policy
+    # carries BOTH statements. Since October 2025 Lambda requires lambda:InvokeFunctionUrl AND
+    # lambda:InvokeFunction (docs: lambda/latest/dg/urls-auth.html); with only the first one the URL
+    # answers 403 AccessDeniedException with an EMPTY app-level body and the function is never
+    # invoked (zero log streams) - which is exactly what run 45065067527 produced on a stack that
+    # was otherwise CREATE_COMPLETE. Note the CFN reference example "Public Function URL Invoke"
+    # shows only ONE statement and is stale: the Lambda dev guide is the authority.
+    # The negative lookahead matters: 'lambda:InvokeFunctionUrl' contains 'lambda:InvokeFunction',
+    # so a plain substring check would pass with the single (insufficient) statement.
+    if ($iacRaw -match '(?m)^[ \t]*Type:[ \t]*AWS::Lambda::Url' -and $iacRaw -match '(?m)^[ \t]*AuthType:[ \t]*NONE') {
         if ($iacRaw -notmatch 'lambda:InvokeFunctionUrl') {
-            Add-Fail "IaC asserts: AWS::Lambda::Url with AuthType NONE but no 'lambda:InvokeFunctionUrl' permission - the public endpoint would not be invocable (AWS docs: Public Function URL Invoke)."
+            Add-Fail "IaC asserts: AWS::Lambda::Url with AuthType NONE but no 'lambda:InvokeFunctionUrl' permission - the public endpoint would not be invocable."
         }
-        if ($iacRaw -notmatch "(?m)^\s*FunctionUrlAuthType:\s*'?NONE'?") {
+        if ($iacRaw -notmatch "(?m)^[ \t]*FunctionUrlAuthType:[ \t]*'?NONE'?") {
             Add-Fail "IaC asserts: AWS::Lambda::Url with AuthType NONE but the Permission lacks FunctionUrlAuthType 'NONE' - the permission would not apply to URL invocations."
+        }
+        if ($iacRaw -notmatch 'lambda:InvokeFunction(?!Url)') {
+            Add-Fail "IaC asserts: AWS::Lambda::Url with AuthType NONE needs BOTH lambda:InvokeFunctionUrl AND lambda:InvokeFunction (Lambda change of Oct 2025) - with only the first, the URL answers 403 and the function is never invoked."
+        }
+        if ($iacRaw -notmatch '(?m)^[ \t]*InvokedViaFunctionUrl:[ \t]*true') {
+            Add-Fail "IaC asserts: the lambda:InvokeFunction statement for a public URL must set InvokedViaFunctionUrl true - without it, Principal '*' allows invoking the function by ANY path, not just the URL (least privilege, I4)."
+        }
+    }
+    # --- Runtime parity (D-61): Lambda runtime <-> CI Node <-> package.json engines ---------------
+    # D-40 chose nodejs22.x BECAUSE the local engine was 22 (minimal dev/prod drift). D-61 moves the
+    # runtime to nodejs26.x on the user's explicit call, so local-vs-prod parity is now a RECORDED
+    # drift (local Node stays 22.20.0). What must NOT drift silently is the pair that breaks the build:
+    #   * CI node-version must match the runtime major, or the runner tests a different Node than prod.
+    #   * engines.node must ADMIT the runtime major, or `pnpm install --frozen-lockfile` dies in the
+    #     runner with ERR_PNPM_UNSUPPORTED_ENGINE - a red that has nothing to do with the code.
+    $rtMatch = [regex]::Match($iacRaw, '(?m)^[ \t]*Runtime:[ \t]*nodejs(\d+)\.x[ \t]*(#.*)?$')
+    if ($rtMatch.Success) {
+        $rtMajor = [int]$rtMatch.Groups[1].Value
+        $wfForNode = Join-Path $RepoRoot ".github/workflows/deploy.yml"
+        if (Test-Path $wfForNode) {
+            $wfRaw2 = Get-Content $wfForNode -Raw -Encoding UTF8
+            $ciMajors = @([regex]::Matches($wfRaw2, "(?m)^[ \t]*node-version:[ \t]*'?`"?(\d+)") | ForEach-Object { [int]$_.Groups[1].Value } | Sort-Object -Unique)
+            foreach ($cm in $ciMajors) {
+                if ($cm -ne $rtMajor) {
+                    Add-Fail ("Runtime parity: CI installs Node {0} but template.yaml deploys nodejs{1}.x - the gates would run on a different engine than production (D-61)." -f $cm, $rtMajor)
+                }
+            }
+            if ($ciMajors.Count -eq 0) {
+                Add-Note "Runtime parity: no pinned node-version found in deploy.yml (runner default applies)."
+            }
+        }
+        $pkgForEngines = Join-Path $RepoRoot "package.json"
+        if (Test-Path $pkgForEngines) {
+            try {
+                $enginesNode = (Get-Content $pkgForEngines -Raw -Encoding UTF8 | ConvertFrom-Json).engines.node
+                if ($enginesNode) {
+                    $lo = [regex]::Match($enginesNode, '>=?\s*(\d+)')
+                    $hi = [regex]::Match($enginesNode, '<\s*(\d+)')
+                    if ($lo.Success -and $hi.Success) {
+                        $loV = [int]$lo.Groups[1].Value; $hiV = [int]$hi.Groups[1].Value
+                        if (($rtMajor -lt $loV) -or ($rtMajor -ge $hiV)) {
+                            Add-Fail ("Runtime parity: engines.node '{0}' does not admit nodejs{1}.x - pnpm install would fail in the runner with ERR_PNPM_UNSUPPORTED_ENGINE (D-61)." -f $enginesNode, $rtMajor)
+                        }
+                    }
+                    Add-Note ("Runtime parity: Lambda nodejs{0}.x, engines.node '{1}'." -f $rtMajor, $enginesNode)
+                }
+            } catch {
+                Add-Note "Runtime parity: package.json unreadable, engines check skipped."
+            }
         }
     }
     # Single-region rule (I7) - REWRITTEN 2026-11-22 for D-54: the expected region is NO LONGER a
