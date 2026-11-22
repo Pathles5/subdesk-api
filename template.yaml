@@ -51,6 +51,19 @@ Parameters:
       setWebhook. Injected at deploy time via --parameter-overrides from the
       GitHub Secret TELEGRAM_WEBHOOK_SECRET. Never commit this value to git.
 
+# Cost-allocation tags (added in Fase 04 at the user's request): every taggable
+# resource carries Project=subdesk-api and, where the form allows, Stack=<stack
+# name>. This is what makes the $0-budget evidence (I2) auditable end to end: the
+# Billing budget (EUR 0.01) filters by Cost Filters { "Tag": ["project/subdesk-api"] }
+# and Cost Explorer groups by the same tag. The Lambda tag is REQUIRED — without a
+# tag on the function itself its costs never appear in tag filters. On the CFN-
+# native resources the Stack value is !Ref AWS::StackName (byte-identical to
+# 'subdesk-api-dev' in dev, D-25, and it stays honest if the template is re-hosted
+# — runbook 2.7 checklist item 3); on the SAM function it is the literal, for the
+# reason documented in that resource's comment. AWS::Lambda::Url supports no Tags
+# property and AWS::Lambda::Permission neither supports Tags nor bills anything.
+# Enabling the tags in Billing (cost allocation tags) remains a MANUAL user step.
+# Tags are metadata only: they change no resource's behavior, capacity or cost.
 Resources:
   TicketsTable:
     Type: AWS::DynamoDB::Table
@@ -70,6 +83,8 @@ Resources:
       Tags:
         - Key: Project
           Value: subdesk-api
+        - Key: Stack
+          Value: !Ref AWS::StackName
 
   TicketApiFunction:
     Type: AWS::Serverless::Function
@@ -78,16 +93,37 @@ Resources:
       # below are built from this literal, so the pairing is deterministic.
       FunctionName: TicketApiFunction
       # Handler is ESM (package.json "type": "module"); nodejs22.x supports ESM
-      # handlers natively (D-40). Packaging: flat hoisted node_modules tree,
-      # built by deterministic pnpm steps, never by sam build scripts (D-31).
+      # handlers natively (D-40). Packaging (D-31/D-42, Fase 04 — staging=artifact):
+      # the ZIP artifact IS the staging produced by scripts/package-lambda.mjs
+      # (no sam build, no gitignore filtering — D-31/I4b fail-closed asserts inside
+      # the script). dist/lambda = src/ + production-trimmed package.json + flat
+      # hoisted prod node_modules, zero symlinks; deploy.yml materializes it in the
+      # deploy workspace and `sam package` zips THAT directory verbatim.
       Handler: src/lambda.handler
       Runtime: nodejs22.x
       Architectures:
         - x86_64
-      CodeUri: ./
+      CodeUri: dist/lambda
       MemorySize: 256
       Timeout: 30
       Role: !GetAtt AppRole.Arn
+      # Tags map form (not the CFN Key/Value list) is the AWS::Serverless::Function
+      # schema; the transform renders it into the generated AWS::Lambda::Function
+      # Tags list. REQUIRED for cost allocation: an untagged function is invisible
+      # to the Budget/Cost Explorer tag filter (see the tag note above Resources:).
+      # Globals: Function: Tags could carry the same keys; per-resource Tags is used
+      # deliberately (one function total, no merge semantics to audit).
+      # The Stack value here is the literal 'subdesk-api-dev', not !Ref
+      # AWS::StackName: the SAM Tags property is a String->String map and the
+      # transform's handling of intrinsics inside it is not provable with the
+      # offline gate alone, while the literal is byte-identical at deploy time
+      # (the stack name is fixed by D-25). The CFN-native resources below keep
+      # !Ref AWS::StackName (documented Tags list form). If the stack is ever
+      # renamed for another client, updating this literal is part of runbook 2.7
+      # bootstrap checklist item (3).
+      Tags:
+        Project: subdesk-api
+        Stack: subdesk-api-dev
       Environment:
         Variables:
           TABLE_NAME: !Ref TicketsTable
@@ -133,6 +169,13 @@ Resources:
                   - logs:CreateLogStream
                   - logs:PutLogEvents
                 Resource: !Sub arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/TicketApiFunction:*
+      # AWS::IAM::Role Tags: Key/Value list form. The role bills nothing itself
+      # (I2), the tag is for the tag-grouped resource inventory in Cost Explorer.
+      Tags:
+        - Key: Project
+          Value: subdesk-api
+        - Key: Stack
+          Value: !Ref AWS::StackName
 
   ApiLogGroup:
     Type: AWS::Logs::LogGroup
@@ -143,6 +186,11 @@ Resources:
       # orders this resource after the function (cfn-lint W3005).
       LogGroupName: !Sub /aws/lambda/${TicketApiFunction}
       RetentionInDays: 30
+      Tags:
+        - Key: Project
+          Value: subdesk-api
+        - Key: Stack
+          Value: !Ref AWS::StackName
 
   # The Function URL is declared as the CFN-native resource, NOT as the SAM
   # `FunctionUrlConfig` property. Reason, verified with cfn-lint 1.61.0:
@@ -183,6 +231,11 @@ Resources:
           - X-Telegram-Bot-Api-Secret-Token
         MaxAge: 300
         # AllowCredentials omitted on purpose: invalid with AllowOrigins ['*'] (I4).
+      # No Tags here: the AWS::Lambda::Url resource type (CFN template reference,
+      # verified 2026-11-22) exposes only AuthType/Cors/InvokeMode/Qualifier/
+      # TargetFunctionArn — a Tags property would fail cfn-lint E3002. The URL is
+      # not a billable resource (D-27), so it is absent from tag cost filters by
+      # nature; its cost story is fully covered by the tagged function.
 
   TicketApiUrlInvokePermission:
     Type: AWS::Lambda::Permission
@@ -198,6 +251,9 @@ Resources:
       Action: 'lambda:CreateFunctionUrlConfig'
       FunctionName: !GetAtt TicketApiFunction.Arn
       Principal: AWS:UrlInvoke
+      # AWS::Lambda::Permission admits no Tags property (schema has none); the
+      # statement is not a billable resource either, so it stays outside the
+      # cost-allocation tag set. Its cost story is carried by the tagged function.
 
 Outputs:
   FunctionUrl:

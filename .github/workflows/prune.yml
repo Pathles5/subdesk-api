@@ -1,0 +1,115 @@
+# prune.yml — controlled demolition of the dev stack (Fase 04, T-04; spec §4/§5).
+#
+# workflow_dispatch ONLY — never push, never schedule. DOUBLE confirmation, both
+# mechanical and auditable (D-42):
+#   (1) the `confirm` input must equal the literal BORRO-SUBDESK-API-DEV exactly;
+#   (2) the `destroy` job runs in environment `dev`, so it additionally requires
+#       the human required-reviewer approval — the I6 visto for a destructive
+#       action (same mechanism that gates deploy.yml, D-43).
+#
+# Identity: OIDC ONLY (D-43) — no static AWS keys referenced (spec §5.3; the
+# check.ps1 assert over .github/** must stay green).
+#
+# What is deleted: the whole CloudFormation stack subdesk-api-dev — TicketsTable
+# WITH ANY REAL TICKET DATA (export first; runbook §4), TicketApiFunction, its log
+# group, the Function URL AND its AuthType:NONE resource-policy statement (deleting
+# the complete stack leaves no orphaned policy — runbook §4 note).
+#
+# What is NOT deleted: the SAM artifacts bucket (aws-sam-cli-managed-subdesk-api-dev-
+# artifacts). Its objects already expire after 30 days via the lifecycle rule that
+# deploy.yml guarantees on every run, so the residual cost is ~$0 (within S3 free
+# tier; the bucket itself was accepted in D-15 at <$0.01/mes). Deleting the bucket
+# would need s3:DeleteBucket/DeleteObject/PutBucketVersioning permissions the CI
+# role deliberately does NOT carry. Empty-while-deleting is also NOT attempted.
+name: prune
+run-name: prune subdesk-api-dev (${{ github.event.inputs.confirm }})
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm:
+        description: >-
+          Type exactly BORRO-SUBDESK-API-DEV to authorize deleting the dev stack,
+          including the DynamoDB TicketsTable and all its data.
+        required: true
+        type: string
+
+permissions:
+  id-token: write   # OIDC federation (D-43)
+  contents: read    # nothing is checked out, but least privilege stays explicit
+
+concurrency:
+  # Same group as deploy.yml ("concurrency igual", T-04 brief): a prune dispatch
+  # cancels an in-flight deploy and vice versa — the two must never race against
+  # one stack (single executor, D-42).
+  group: subdesk-api-dev-deploy
+  cancel-in-progress: true
+
+jobs:
+  verify-approval:
+    name: verify-approval — refuse unless the confirmation literal matches
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Check the confirmation input (exact string, case-sensitive)
+        # The input travels through step env, never interpolated into the shell
+        # script text (input-controlled command injection is still a command
+        # injection even on a credential-less job).
+        env:
+          CONFIRM_INPUT: ${{ github.event.inputs.confirm }}
+        run: |
+          if [ "$CONFIRM_INPUT" != "BORRO-SUBDESK-API-DEV" ]; then
+            echo "Aborting: 'confirm' must be exactly BORRO-SUBDESK-API-DEV." >&2
+            exit 1
+          fi
+          echo "Confirmation literal matched. The destroy job still needs the"
+          echo "'dev' environment approval from the required reviewer (I6 visto)."
+
+  destroy:
+    name: destroy — delete-stack subdesk-api-dev and wait for DELETE_COMPLETE
+    needs: verify-approval
+    runs-on: ubuntu-latest
+    # environment: dev — the second, independent confirmation (required reviewer).
+    environment: dev
+    timeout-minutes: 30
+    steps:
+      - name: Configure AWS credentials via OIDC (no static keys — D-43)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: us-east-1   # single region (I2); same literal as deploy.yml
+          role-session-name: github-subdesk-prune
+
+      - name: Delete the stack and poll describe-stacks until DELETE_COMPLETE
+        # cloudformation:DeleteStack and DescribeStacks on stack/subdesk-api-dev/*
+        # are already in SubDeskCiDeployPolicy (bootstrap §2). Once CFN drops the
+        # stack record, describe-stacks errors and the query yields nothing: that
+        # absence IS DELETE_COMPLETE (CFN keeps deleted records ~500 days only via
+        # history, not via describe-stacks).
+        # KNOWN GAP (reported, not hacked around): the policy currently lacks
+        # logs:DeleteLogGroup, so the stack's API log group deletion can fail with
+        # AccessDenied -> DELETE_FAILED. The fix belongs to the user's bootstrap
+        # (re-run bootstrap-oidc-cli.sh with the amended policy), not here.
+        run: |
+          set -uo pipefail
+          aws cloudformation delete-stack --stack-name subdesk-api-dev --region us-east-1
+          for i in $(seq 1 60); do
+            STATUS=$(aws cloudformation describe-stacks --stack-name subdesk-api-dev \
+              --region us-east-1 \
+              --query 'Stacks[0].StackStatus' --output text 2>/dev/null || true)
+            if [ -z "$STATUS" ] || [ "$STATUS" = "None" ] || [ "$STATUS" = "DELETE_COMPLETE" ]; then
+              echo "Stack subdesk-api-dev is DELETE_COMPLETE (gone from describe-stacks)."
+              exit 0
+            fi
+            echo "poll $i: $STATUS"
+            case "$STATUS" in
+              *FAILED*)
+                echo "Aborting: stack status $STATUS. Inspect the CFN events; a stuck" >&2
+                echo "resource (log group?) needs the bootstrap policy fix, not a retry." >&2
+                exit 1
+                ;;
+            esac
+            sleep 30
+          done
+          echo "Timed out (~30 min) waiting for DELETE_COMPLETE." >&2
+          exit 1

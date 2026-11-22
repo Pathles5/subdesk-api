@@ -1,0 +1,332 @@
+# deploy.yml — SubDesk API deployment pipeline (Fase 04, T-04; D-25 resolved in spec §4).
+#
+# THE ONLY executor of AWS writes for this repo (D-42/I6). Nothing here runs from a
+# workstation; rollback == revert commit + this pipeline re-running (spec §4).
+#
+# The user's "visto" is mechanical and auditable (D-43/D-45): the `dev` GitHub
+# environment has required reviewers, so the `deploy` and `smoke` jobs — the only
+# two jobs that touch AWS — run only after the human approves them in Actions.
+# Two approvals per run are by design (environment approval is per job); do not
+# demote the secrets to repo level to save one click — spec §5.4 puts them in the
+# environment.
+#
+# Identity: OIDC ONLY (D-43). No static AWS keys are referenced anywhere in this
+# file (spec §5.3; check.ps1 asserts it). Secrets (spec §5.4): the three app
+# secrets live only in the `dev` environment and travel exclusively through
+# step-level `env:` blocks into --parameter-overrides / the smoke script. Their
+# VALUES are never echoed, printed, or interpolated into any log line.
+#
+# Packaging chain — staging=artifact (D-31 + runbook §2.5 hazard D3, orchestrator
+# decision 2026-11-22; contract of scripts/package-lambda.mjs §"Contract with CI"):
+#   package job: pnpm install --prod --frozen-lockfile --config.nodeLinker=hoisted
+#       -> node scripts/package-lambda.mjs
+#          stages dist/lambda/ (src + prod package.json + FLAT prod node_modules)
+#          and dist/artifact.zip, with fail-closed asserts (exact prod pins present,
+#          no devDeps leak, no .env, zero symlinks, 250KB..45MB size window).
+#       -> uploads the forensic zip + a tarball handoff of the staging directory.
+#   deploy job: reassembles dist/lambda from the handoff tarball, re-checks it
+#       structurally (read-only, independent), then `sam package` zips THAT
+#       directory because template.yaml now declares CodeUri: dist/lambda.
+#       Why not `CodeUri: ./` + sam package: verified against aws-sam-cli
+#       v1.174.0 source (samcli/lib/package/utils.py) — the no-build packaging
+#       path os.walk()s CodeUri VERBATIM and applies neither .gitignore nor
+#       .samignore; a repo-root CodeUri would ship .git/docs/tests/devDeps.
+#       `sam build` is NEVER invoked (D-31: AWS documents that it runs project
+#       scripts). The artifact uploaded == the staging that was asserted.
+name: deploy
+run-name: deploy ${{ github.sha }}
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  id-token: write   # OIDC federation (D-43) — the only AWS credential path
+  contents: read
+
+concurrency:
+  # Single executor per stack (D-42): a new push cancels an older in-flight run.
+  # Caveat: cancelling mid-`sam deploy` stops only the CLI watcher, the CloudFormation
+  # change set finishes server-side; re-entrancy is safe (--no-fail-on-empty-changeset).
+  group: subdesk-api-dev-deploy
+  cancel-in-progress: true
+
+env:
+  # Single-region invariant (I2/D-26): us-east-1 everywhere. Literals kept in plain
+  # sight for the audit; region is NOT read from a secret/variable.
+  AWS_REGION: us-east-1
+  STACK_NAME: subdesk-api-dev
+  # Artifacts bucket: the CI role's S3 statement only admits arn aws-sam-cli-managed-*,
+  # so the name must live under that prefix. --resolve-s3 is NOT used: its managed-bucket
+  # provisioning path in v1.174.0 is not provable inside this role's permissions, and a
+  # plain create-bucket (s3:CreateBucket IS in the policy) keeps the flow auditable.
+  SAM_BUCKET: aws-sam-cli-managed-subdesk-api-dev-artifacts
+
+jobs:
+  verify:
+    name: verify — all project gates (AGENTS §4 phase-04 gate)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install pnpm (version comes from packageManager; I4b/D-30)
+        uses: pnpm/action-setup@v4
+
+      - name: Setup Node 22 with pnpm cache
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'pnpm'
+
+      # Documented debt: cfn-lint is the validate:iac gate binary and is NOT a pnpm
+      # dependency (the pnpm dependency surface stays the app + repo tooling). Pinned
+      # to the locally-evidenced version (runbook §1 tooling table: 1.61.0) so the CI
+      # gate and the dev gate agree; bumping it is an explicit repo change.
+      - name: Install cfn-lint (validate:iac — non-pnpm binary)
+        run: |
+          python3 -m pip install --user --no-cache-dir cfn-lint==1.61.0
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      - name: Install dependencies (frozen lockfile; full dev+prod for the gates)
+        run: pnpm install --frozen-lockfile
+
+      - name: Gate — lint
+        run: pnpm run lint
+
+      - name: Gate — test
+        run: pnpm test
+
+      - name: Gate — validate:api (redocly lint of the contract)
+        run: pnpm run validate:api
+
+      - name: Gate — validate:iac (cfn-lint template.yaml)
+        run: pnpm run validate:iac
+
+      - name: Gate — check.ps1 (docs + IaC + supply-chain + secret hygiene)
+        # pwsh ships on ubuntu-latest; the package.json `check` script hardcodes
+        # Windows powershell.exe, so the runner invokes the same script directly.
+        run: pwsh -File scripts/check.ps1
+
+  package:
+    name: package — deterministic staging + fail-closed content asserts
+    runs-on: ubuntu-latest
+    needs: verify
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Setup Node 22 with pnpm cache
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'pnpm'
+
+      # EXACTLY the contract of scripts/package-lambda.mjs: production-only, hoisted
+      # (flat, no symlink farm — spike D-31), frozen. DevDeps must be ABSENT here: the
+      # script aborts if they leak into the staging. Invoked with `node`, not
+      # `pnpm run`, so verifyDepsBeforeRun (which expects the full lockfile tree)
+      # does not police this deliberate --prod install.
+      - name: Install production dependencies only (hoisted flat tree)
+        run: pnpm install --prod --frozen-lockfile --config.nodeLinker=hoisted
+
+      - name: Build dist/lambda + dist/artifact.zip with content asserts (T-05 script)
+        run: node scripts/package-lambda.mjs
+
+      - name: Tarball the staging for handoff to the deploy job
+        # Handoff mechanism: template.yaml's CodeUri is dist/lambda, and jobs run on
+        # fresh workspaces, so the asserted staging travels as a single tarball
+        # (layout-independent: the deploy job locates it by filename).
+        run: tar -czf dist/lambda-staging.tgz -C dist lambda
+
+      - name: Upload forensic artifact.zip (kept even if the deploy later fails)
+        uses: actions/upload-artifact@v4
+        with:
+          name: lambda-artifact-zip
+          path: dist/artifact.zip
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Upload staging handoff
+        uses: actions/upload-artifact@v4
+        with:
+          name: lambda-staging-tarball
+          path: dist/lambda-staging.tgz
+          if-no-files-found: error
+          retention-days: 30
+
+  deploy:
+    name: deploy — sam package + sam deploy via OIDC (stack subdesk-api-dev)
+    runs-on: ubuntu-latest
+    needs: package
+    # environment: dev — the required-reviewer approval IS the I6 user visto (D-43).
+    environment: dev
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure AWS credentials via OIDC (no static keys — D-43)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+          role-session-name: github-subdesk-deploy
+
+      - name: Install SAM CLI (no sam build is ever invoked — D-31)
+        uses: aws-actions/setup-sam@v3
+
+      - name: Download staging handoff + forensic zip from the package job
+        uses: actions/download-artifact@v4
+        with:
+          pattern: 'lambda-*'
+          path: artifacts
+          merge-multiple: false
+
+      - name: Reassemble dist/lambda and re-assert it structurally (read-only)
+        # Independent structural guard before sam package touches anything:
+        # fail-closed, so a broken/mispaced handoff aborts the deploy instead of
+        # shipping an empty or partial CodeUri. The CONTENT asserts already ran in
+        # scripts/package-lambda.mjs (package job); these repeat the zero-symlink
+        # invariant (D-31: the Lambda ZIP cannot contain symlink entries) and the
+        # presence of the exact files the handler needs.
+        run: |
+          set -euo pipefail
+          TGZ=$(find artifacts -type f -name lambda-staging.tgz | head -n 1)
+          test -n "$TGZ" || { echo "lambda-staging.tgz not found in downloaded artifacts"; find artifacts -type f | sed 's/^/  found: /'; exit 1; }
+          mkdir -p dist
+          tar -xzf "$TGZ" -C dist
+          test -f dist/lambda/src/lambda.js
+          test -f dist/lambda/package.json
+          test -f dist/lambda/node_modules/express/package.json
+          test -f dist/lambda/node_modules/serverless-http/package.json
+          if [ -n "$(find dist/lambda -type l)" ]; then
+            echo "FAIL: symlink entries reached the staging (Lambda ZIP cannot contain them — D-31)." >&2
+            find dist/lambda -type l
+            exit 1
+          fi
+          echo "staging reassembled: $(find dist/lambda -type f | wc -l) files"
+
+      - name: bootstrap-bucket — ensure the SAM artifacts bucket (idempotent)
+        # Kept as a step of the deploy job, NOT a standalone job: AWS_ROLE_ARN lives in
+        # the dev environment, so a separate job would demand one more manual approval
+        # every run for zero safety gain (this step runs only after THIS job is approved).
+        # s3:CreateBucket / ListBucket (head-bucket) / PutLifecycleConfiguration are all
+        # in SubDeskCiDeployPolicy's SAMArtifactBucket statement (bootstrap §2).
+        # 30-day object expiry mirrors the I2 log-retention rule and keeps the bucket
+        # ~$0 forever (a few MB inside the S3 free tier; the <$0.01/mes cost of the
+        # artifacts bucket itself was accepted in D-15).
+        run: |
+          set -euo pipefail
+          if aws s3api head-bucket --bucket "$SAM_BUCKET" 2>/dev/null; then
+            echo "Bucket $SAM_BUCKET exists: reusing it."
+          else
+            echo "Creating $SAM_BUCKET (name must sit under the aws-sam-cli-managed-* prefix the CI role allows)."
+            aws s3api create-bucket --bucket "$SAM_BUCKET" --region "$AWS_REGION"
+          fi
+          aws s3api put-bucket-lifecycle-configuration \
+            --bucket "$SAM_BUCKET" \
+            --lifecycle-configuration '{"Rules":[{"ID":"expire-sam-artifacts-30d","Status":"Enabled","Filter":{},"Expiration":{"Days":30}}]}'
+
+      - name: Tag the artifacts bucket (cost visibility — needs s3:PutBucketTagging)
+        # The user's cost-by-tag request (Fase 04): Project/Stack on the bucket too.
+        # KNOWN GAP: s3:PutBucketTagging is NOT yet in SubDeskCiDeployPolicy, so this
+        # step is expected to show AccessDenied until the user re-runs the bootstrap
+        # script with the amended policy. It blocks nothing: the bucket holds a few
+        # MB of non-billable-relevant artifacts, and every billable resource in the
+        # stack is already tagged (template.yaml). continue-on-error is deliberate.
+        continue-on-error: true
+        run: |
+          aws s3api put-bucket-tagging \
+            --bucket "$SAM_BUCKET" \
+            --tagging 'TagSet=[{Key=Project,Value=subdesk-api},{Key=Stack,Value=subdesk-api-dev}]'
+
+      - name: sam package — zip the re-asserted staging, upload to S3 (no sam build)
+        run: |
+          sam package \
+            --template-file template.yaml \
+            --output-template-file packaged.yaml \
+            --s3-bucket "$SAM_BUCKET" \
+            --s3-prefix "$STACK_NAME" \
+            --region "$AWS_REGION"
+
+      - name: sam deploy — create/update stack subdesk-api-dev (idempotent)
+        # Secrets only through this step's env (spec §5.4): values reach the CLI as
+        # shell variables and are never written into any echoed literal.
+        # The simple Key=value override form is used because ParameterValue
+        # parsing splits on commas, and WebhookSecretParam's AllowedPattern
+        # technically permits them.
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          ADMIN_API_KEY: ${{ secrets.ADMIN_API_KEY }}
+          TELEGRAM_WEBHOOK_SECRET: ${{ secrets.TELEGRAM_WEBHOOK_SECRET }}
+        run: |
+          set -euo pipefail
+          # Fail loudly with the secret NAME (never its value) if the environment
+          # lost one of the three app secrets — better than a confusing NoEcho error.
+          for s in TELEGRAM_BOT_TOKEN ADMIN_API_KEY TELEGRAM_WEBHOOK_SECRET; do
+            if [ -z "${!s}" ]; then
+              echo "Missing dev-environment secret: $s" >&2
+              exit 1
+            fi
+          done
+          sam deploy \
+            --template-file packaged.yaml \
+            --stack-name "$STACK_NAME" \
+            --region "$AWS_REGION" \
+            --capabilities CAPABILITY_IAM \
+            --no-fail-on-empty-changeset \
+            --no-confirm-changeset \
+            --parameter-overrides \
+              "TelegramBotTokenParam=$TELEGRAM_BOT_TOKEN" \
+              "AdminApiKeyParam=$ADMIN_API_KEY" \
+              "WebhookSecretParam=$TELEGRAM_WEBHOOK_SECRET"
+
+  smoke:
+    name: smoke — 15 live collection cases against the Function URL
+    needs: deploy
+    runs-on: ubuntu-latest
+    # environment: dev — required because the smoke script needs two dev secrets to
+    # authenticate (spec §5.4 keeps them environment-scoped). This is the second
+    # approval per run; it is intentional, not an oversight.
+    environment: dev
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node 22 (smoke-live.mjs is zero-dependency: node:fs + global fetch)
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Configure AWS credentials via OIDC (read-only describe-stacks)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+          role-session-name: github-subdesk-smoke
+
+      - name: Read the live FunctionUrl from stack outputs
+        id: url
+        # FunctionUrl is public information (AuthType NONE endpoint, D-27) — safe to
+        # surface in the log; the two secrets below never are.
+        run: |
+          set -euo pipefail
+          URL=$(aws cloudformation describe-stacks \
+            --stack-name "$STACK_NAME" --region "$AWS_REGION" \
+            --query "Stacks[0].Outputs[?OutputKey=='FunctionUrl'].OutputValue" --output text)
+          if [ -z "$URL" ] || [ "$URL" = "None" ]; then
+            echo "FunctionUrl output missing from the stack — deploy did not complete cleanly." >&2
+            exit 1
+          fi
+          echo "url=$URL" >> "$GITHUB_OUTPUT"
+
+      - name: Run scripts/smoke-live.mjs (era-stub table: 401/403/404/501/200-ignored)
+        env:
+          FUNCTION_URL: ${{ steps.url.outputs.url }}
+          ADMIN_API_KEY: ${{ secrets.ADMIN_API_KEY }}
+          TELEGRAM_WEBHOOK_SECRET: ${{ secrets.TELEGRAM_WEBHOOK_SECRET }}
+        run: node scripts/smoke-live.mjs

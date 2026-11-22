@@ -9,5 +9,10 @@ node_modules/
 docs/api/api.html
 dist/
 
+# Pipeline byproducts (T-04, 2026-11-22): packaged template is runner-only, staging artifacts too
+packaged.yaml
+artifacts/
+.aws-sam/
+
 # OS noise
 .DS_Store

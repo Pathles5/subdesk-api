@@ -276,7 +276,9 @@ if (Test-Path $workflowDir) {
 
 # --- Secret hygiene scan (D-13 / I4) ---
 if (-not $SkipSecretScan) {
-    $excludeRegex = '\\(\.git|node_modules|dist|build|coverage|\.serverless|\.aws-sam|\.output)\\'
+    # Cross-platform exclusion (Windows \ and Linux /): node_modules etc. must never be scanned
+    # (the runner verify job has full trees; a Windows-only pattern made the scan slow AND noisy on Linux).
+    $excludeRegex = '[\\/](\.git|node_modules|dist|packaged\.yaml|artifacts|build|coverage|\.serverless|\.aws-sam|\.output)([\\/]|$)'
     $exts = @(".md", ".js", ".mjs", ".cjs", ".ts", ".json", ".yml", ".yaml", ".ps1", ".txt", ".example", ".mmd", ".html", ".graphql")
     $patterns = @(
         @{ name = "Telegram bot token shape"; regex = '\d{8,10}:AA[A-Za-z0-9_-]{25,}' },
