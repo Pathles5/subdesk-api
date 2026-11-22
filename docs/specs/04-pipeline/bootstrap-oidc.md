@@ -90,9 +90,9 @@ Repo → Settings → Environments → **New environment**: `dev`.
 | Paso | Estado |
 |---|---|
 | 1. Provider OIDC | ✔ creado el 2026-11-20 — `arn:aws:iam::159177056493:oidc-provider/token.actions.githubusercontent.com` |
-| 2. Rol `SubDeskCiDeployRole` | ⏳ en curso vía `bootstrap-oidc-cli.sh` (idempotente: salta provider existente, fija el trust con la condición `environment:dev`, re-put la policy, imprime el ARN) |
+| 2. Rol `SubDeskCiDeployRole` | ✔ **creado el 2026-11-22** vía `bootstrap-oidc-cli.sh` en CloudShell (provider existente saltado; trust `sub=repo:Pathles5/subdesk-api:environment:dev`; policy inline) — ARN: `arn:aws:iam::159177056493:role/SubDeskCiDeployRole` |
 | 3. Alerta $0 | ⏳ |
-| 4. Environment `dev` + secretos | ✔ environment y secretos creados (usuario 2026-11-20; `AWS_ACCOUNT_ID`/`AWS_REGION` guardados como secretos — elección registrada en D-45). Falta el valor `AWS_ROLE_ARN` |
+| 4. Environment `dev` + secretos | ✔ environment y secretos creados (usuario 2026-11-20; `AWS_ACCOUNT_ID`/`AWS_REGION` guardados como secretos — elección registrada en D-45). **Pendiente: pegar el ARN del rol como `AWS_ROLE_ARN`** |
 | 5. Bot de prueba (@BotFather) | ⏳ token → secreto `TELEGRAM_BOT_TOKEN` |
 
 Cuando el paso 1–4 esté hecho, dime "bootstrap listo" y el orquestador: (a) verifica por lectura, (b) despacha T-04/T-05/T-06 (workflows + scripts + asserts), (c) te propone el push del workflow y el primer deploy lo apruebas tú **en la pestaña Actions** del PR/merge. Nada más toca AWS desde esta máquina: ni ahora ni después.
