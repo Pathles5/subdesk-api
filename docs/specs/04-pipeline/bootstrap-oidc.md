@@ -12,7 +12,7 @@ Console → IAM → Identity providers → Add provider:
 
 **Guía de consola paso a paso (T-03; para llevar al cliente, replicar igual con sus valores):**
 
-1. IAM → **Roles → Create role**. Trusted identity: **Web identity** → Identity provider: `token.actions.githubusercontent.com` → Audience: **Custom** → `sts.amazonaws.com` (exacto; si dejas *Everyone*, el `aud` del trust no coincidirá y el `AssumeRoleWithWebIdentity` falla). Next.
+1. IAM → **Roles → Create role**. Trusted identity: **Web identity** → Identity provider: `token.actions.githubusercontent.com`. ⚠️ El wizard pregunta "GitHub organization": con cuenta personal es el **usuario propietario del repo** (dev: `Pathles5`), y en "repository": `subdesk-api` — **nunca** *all repositories*. Si pregunta branches/environment: ambiente `dev`; si solo ramas: `main` y entonces el paso 4 es obligatorio. Audience: **Custom** → `sts.amazonaws.com` (exacto; si dejas *Everyone*, el `aud` del trust no coincidirá y el `AssumeRoleWithWebIdentity` falla). Next. *(Si ofrece instalar una GitHub App para gestionar OIDC: rechazable — el provider ya existe desde el paso 1.)*
 2. Permissions: **Create policy** → pestaña **JSON** → pegar la policy `SubDeskCiDeployPolicy` (bloque C de abajo) → Review → name `SubDeskCiDeployPolicy`. Next.
 3. Role name: **`SubDeskCiDeployRole`** → Create role.
 4. Abrir el rol → pestaña **Trust relationships → Edit trust policy** → reemplazar TODO el documento por el JSON **A** de abajo. El `Condition` es el candado D-43/D-45: ata el rol a ESTE repo y a SU environment `dev`. Save changes.
