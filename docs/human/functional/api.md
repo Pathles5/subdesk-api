@@ -1,6 +1,6 @@
 # API en lenguaje humano — los 4 endpoints de SubDesk
 
-Actualizado: fase 03 · 2026-11-20
+Actualizado: fase 04 · 2026-11-22
 
 > Documento para quien **integra el panel frontend** u **opera la conexión con Telegram**. El contrato machine-readable vinculante es `docs/api/openapi.yaml` (OpenAPI 3.1, nace en Fase 01): si alguna vez este texto y el contrato difieren, **manda el contrato** — repórtalo, no lo asumas. Aquí no hay jerga de AWS: qué envías, qué recibes y qué casos raros existen.
 
@@ -15,7 +15,7 @@ Actualizado: fase 03 · 2026-11-20
 | `PATCH` | `/api/tickets/{id}` | cambiar el estado de un ticket (sin responder al usuario) | cabecera `x-api-key` | `200` con el ticket actualizado |
 | `POST` | `/api/tickets/{id}/reply` | responder al usuario **en su chat de Telegram** y cerrar el ticket | cabecera `x-api-key` | `200` con el ticket `RESOLVED` |
 
-Las cuatro rutas conviven en una sola URL pública. En los ejemplos uso el placeholder `https://SU-URL.lambda-url.us-east-1.on.aws`; la URL real sale del despliegue de la Fase 04 (pipeline — D-42) y queda registrada en el `README.md` de la raíz. El campo JSON `id` de la ruta es el identificador opaco del ticket (un UUID; trátalo como caja negra).
+Las cuatro rutas conviven en una sola URL pública. En los ejemplos uso el placeholder `https://SU-URL.lambda-url.eu-west-1.on.aws`; la URL real sale del despliegue de la Fase 04 (pipeline — D-42) y queda registrada en el `README.md` de la raíz. La región del host en el ejemplo es la destino vigente — `eu-west-1`, declarada en `infra/deployment.env` (**D-54**) — pero el host exacto **solo se conoce con el deploy**: trátalo siempre como placeholder hasta que el `README.md` lo fije. El campo JSON `id` de la ruta es el identificador opaco del ticket (un UUID; trátalo como caja negra).
 
 ### Autenticación, en dos frases
 
@@ -31,7 +31,7 @@ En este documento todos los valores son placeholders (`SU_CLAVE`, `SU_SECRETO`, 
 **Para qué sirve:** cada mensaje de un usuario al bot llega aquí. Si es un mensaje de texto legítimo y nuevo, se crea un ticket en estado `PENDING`. Todo lo demás se descarta **sin error**.
 
 ```bash
-curl -X POST "https://SU-URL.lambda-url.us-east-1.on.aws/webhook/telegram" \
+curl -X POST "https://SU-URL.lambda-url.eu-west-1.on.aws/webhook/telegram" \
   -H "content-type: application/json" \
   -H "X-Telegram-Bot-Api-Secret-Token: SU_SECRETO" \
   -d '{"update_id":482391756,"message":{"message_id":42,"from":{"id":112233445,"is_bot":false,"first_name":"Ana","username":"ana_example"},"chat":{"id":112233445,"type":"private"},"date":1763424000,"text":"Hola, mi suscripcion no se ha renovado."}}'
@@ -70,7 +70,7 @@ Respuestas de este endpoint: `200` (creado o ignorado) y `403` (secreto inválid
 **Para qué sirve:** listar tickets, opcionalmente filtrados por estado, de más recientes a más antiguos.
 
 ```bash
-curl "https://SU-URL.lambda-url.us-east-1.on.aws/api/tickets?status=PENDING&limit=50" \
+curl "https://SU-URL.lambda-url.eu-west-1.on.aws/api/tickets?status=PENDING&limit=50" \
   -H "x-api-key: SU_CLAVE"
 ```
 
@@ -118,7 +118,7 @@ Respuestas: `200`, `400` (filtros inválidos), `401` (falta `x-api-key`), `403` 
 **Para qué sirve:** marcar un ticket como atendido (`IN_PROGRESS`) o cerrarlo administrativamente (`RESOLVED`, **sin** responder al usuario; el cierre con respuesta es `reply`).
 
 ```bash
-curl -X PATCH "https://SU-URL.lambda-url.us-east-1.on.aws/api/tickets/2f6cf473-16d5-5b61-9a3f-08e1a0d1f4e7" \
+curl -X PATCH "https://SU-URL.lambda-url.eu-west-1.on.aws/api/tickets/2f6cf473-16d5-5b61-9a3f-08e1a0d1f4e7" \
   -H "x-api-key: SU_CLAVE" \
   -H "content-type: application/json" \
   -d '{"status":"IN_PROGRESS"}'
@@ -141,7 +141,7 @@ Respuestas: `200`, `400`, `401`, `403`, `404`.
 **Para qué sirve:** escribir la respuesta al usuario **en su chat de Telegram** y cerrar el ticket. Es el único camino que produce `RESOLVED` con mensaje entregado.
 
 ```bash
-curl -X POST "https://SU-URL.lambda-url.us-east-1.on.aws/api/tickets/2f6cf473-16d5-5b61-9a3f-08e1a0d1f4e7/reply" \
+curl -X POST "https://SU-URL.lambda-url.eu-west-1.on.aws/api/tickets/2f6cf473-16d5-5b61-9a3f-08e1a0d1f4e7/reply" \
   -H "x-api-key: SU_CLAVE" \
   -H "content-type: application/json" \
   -d '{"response_text":"Hola Ana: he revisado tu caso y la suscripcion queda renovada 30 dias mas."}'

@@ -18,7 +18,35 @@ GITHUB_ORG_REPO="Pathles5/subdesk-api"                    # owner/repo (cuenta p
 #   => repo:Pathles5@43617338/subdesk-api@1462037116   (use_immutable_subject: true)
 GITHUB_SUB_PREFIX="Pathles5@43617338/subdesk-api@1462037116"   # owner@OWNER_ID/repo@REPO_ID
 GITHUB_ENVIRONMENT="dev"                                  # environment de GitHub: scope de secretos + claim OIDC (D-45 nombre; D-48: SIN required reviewers, el visto es el push)
-REGION="us-east-1"
+# Defaults historicos por si el script se ejecuta sin el repo delante (CloudShell). DEBEN coincidir
+# con infra/deployment.env: check.ps1 lo audita, asi que una migracion de region a medias no pasa.
+REGION="eu-west-1"
+STACK_NAME="subdesk-api-dev"
+# ---- D-54: la region y los nombres se PARAMETRIZAN ---------------------------------------------
+# La fuente de verdad del destino de despliegue es `infra/deployment.env` en el repo. Este script se
+# ejecuta en CloudShell del usuario, donde el repo puede NO estar clonado, asi que:
+#   1) si existe `infra/deployment.env` (por defecto o en $DEPLOY_ENV), se cargan de ahi REGION,
+#      STACK_NAME, ARTIFACTS_BUCKET, AWS_ACCOUNT_ID y GITHUB_ENVIRONMENT (set -a);
+#   2) si NO existe, valen los literales de arriba, que DEBEN coincidir: `check.ps1` audita la
+#      igualdad entre este script y el fichero, asi que una migracion de region a medias no pasa
+#      la compuerta (que es exactamente como se col6 el eu-west-1 manual de esta sesion).
+# Cambiar de region = editar infra/deployment.env + re-ejecutar ESTE script (re-emite la policy con
+# los ARNs de la region nueva) + dejar que la pipeline cree el bucket de artefactos de esa region.
+# Ojo: el NOMBRE del bucket S3 es un espacio de nombres GLOBAL; por eso lleva sufijo de region.
+DEPLOY_ENV="${DEPLOY_ENV:-infra/deployment.env}"
+if [ -f "$DEPLOY_ENV" ]; then
+  echo "Destino leido de $DEPLOY_ENV:"
+  set -a; . "$DEPLOY_ENV"; set +a
+  REGION="${AWS_REGION:-$REGION}"
+  ACCOUNT_ID="${AWS_ACCOUNT_ID:-$ACCOUNT_ID}"
+  STACK_NAME="${STACK_NAME:-subdesk-api-dev}"
+  GITHUB_ENVIRONMENT="${GITHUB_ENVIRONMENT:-$GITHUB_ENVIRONMENT}"
+else
+  echo "AVISO: no existe $DEPLOY_ENV (ejecutado fuera del repo): se usan los literales de cabecera." >&2
+  REGION="${AWS_REGION:-$REGION}"
+  STACK_NAME="subdesk-api-dev"
+fi
+echo "Region de destino: $REGION | stack: $STACK_NAME | cuenta: $ACCOUNT_ID"
 # ===================================================================
 
 ROLE_NAME="SubDeskCiDeployRole"
@@ -31,7 +59,7 @@ if [ "$CURRENT" != "$ACCOUNT_ID" ]; then
   echo "ABORT: la sesión aws apunta a la cuenta $CURRENT, no a $ACCOUNT_ID. Revisa tus credenciales." >&2
   exit 1
 fi
-echo "Cuenta confirmada: $CURRENT ($REGION). Region de destino: us-east-1."
+echo "Cuenta confirmada: $CURRENT. Región de destino: $REGION."
 
 # ---- 1) Provider OIDC (idempotente: crea solo si no existe) ----
 if ! aws iam list-open-id-connect-providers --query "OpenIDConnectProviderList[?Arn=='arn:aws:iam::$ACCOUNT_ID:oidc-provider/$ISSUER']" --output text | grep -q "$ISSUER"; then
@@ -143,13 +171,13 @@ POLICY="$(cat <<JSON
 {
   "Version": "2012-10-17",
   "Statement": [
-    { "Sid": "CloudFormation", "Effect": "Allow", "Action": ["cloudformation:CreateChangeSet","cloudformation:DescribeChangeSet","cloudformation:ExecuteChangeSet","cloudformation:DescribeStacks","cloudformation:DescribeStackEvents","cloudformation:GetTemplateSummary","cloudformation:DeleteStack"], "Resource": "arn:aws:cloudformation:us-east-1:$ACCOUNT_ID:stack/subdesk-api-dev/*" },
+    { "Sid": "CloudFormation", "Effect": "Allow", "Action": ["cloudformation:CreateChangeSet","cloudformation:DescribeChangeSet","cloudformation:ExecuteChangeSet","cloudformation:DescribeStacks","cloudformation:DescribeStackEvents","cloudformation:GetTemplateSummary","cloudformation:DeleteStack"], "Resource": "arn:aws:cloudformation:$REGION:$ACCOUNT_ID:stack/$STACK_NAME/*" },
     { "Sid": "SAMArtifactBucket", "Effect": "Allow", "Action": ["s3:CreateBucket","s3:PutObject","s3:GetObject","s3:ListBucket","s3:PutEncryptionConfiguration","s3:PutLifecycleConfiguration","s3:PutBucketTagging"], "Resource": ["arn:aws:s3:::aws-sam-cli-managed-*", "arn:aws:s3:::aws-sam-cli-managed-*/*"] },
-    { "Sid": "LambdaScoped", "Effect": "Allow", "Action": ["lambda:CreateFunction","lambda:GetFunction","lambda:UpdateFunctionCode","lambda:UpdateFunctionConfiguration","lambda:DeleteFunction","lambda:GetFunctionConfiguration","lambda:ListVersionsByFunction","lambda:TagResource","lambda:ListTags"], "Resource": "arn:aws:lambda:us-east-1:$ACCOUNT_ID:function:TicketApiFunction" },
-    { "Sid": "FunctionUrlScoped", "Effect": "Allow", "Action": ["lambda:CreateFunctionUrlConfig","lambda:GetFunctionUrlConfig","lambda:UpdateFunctionUrlConfig","lambda:DeleteFunctionUrlConfig","lambda:AddPermission","lambda:RemovePermission"], "Resource": "arn:aws:lambda:us-east-1:$ACCOUNT_ID:function:TicketApiFunction" },
-    { "Sid": "TableScoped", "Effect": "Allow", "Action": ["dynamodb:CreateTable","dynamodb:DescribeTable","dynamodb:DeleteTable","dynamodb:UpdateTable","dynamodb:TagResource","dynamodb:ListTagsOfResource"], "Resource": "arn:aws:dynamodb:us-east-1:$ACCOUNT_ID:table/subdesk-api-dev-*" },
-    { "Sid": "LogsScoped", "Effect": "Allow", "Action": ["logs:DescribeLogGroups","logs:ListTagsForResource","logs:CreateLogGroup","logs:PutRetentionPolicy","logs:TagResource","logs:DeleteLogGroup"], "Resource": "arn:aws:logs:us-east-1:$ACCOUNT_ID:log-group:/aws/lambda/TicketApiFunction*" },
-    { "Sid": "CFNRolesLifecycle", "Effect": "Allow", "Action": ["iam:CreateRole","iam:GetRole","iam:GetRolePolicy","iam:PutRolePolicy","iam:DeleteRolePolicy","iam:DeleteRole","iam:TagRole","iam:UntagRole","iam:ListRolePolicies","iam:ListAttachedRolePolicies","iam:ListInstanceProfilesForRole","iam:UpdateAssumeRolePolicy"], "Resource": "arn:aws:iam::$ACCOUNT_ID:role/subdesk-api-dev-*" },
+    { "Sid": "LambdaScoped", "Effect": "Allow", "Action": ["lambda:CreateFunction","lambda:GetFunction","lambda:UpdateFunctionCode","lambda:UpdateFunctionConfiguration","lambda:DeleteFunction","lambda:GetFunctionConfiguration","lambda:ListVersionsByFunction","lambda:TagResource","lambda:ListTags"], "Resource": "arn:aws:lambda:$REGION:$ACCOUNT_ID:function:TicketApiFunction" },
+    { "Sid": "FunctionUrlScoped", "Effect": "Allow", "Action": ["lambda:CreateFunctionUrlConfig","lambda:GetFunctionUrlConfig","lambda:UpdateFunctionUrlConfig","lambda:DeleteFunctionUrlConfig","lambda:AddPermission","lambda:RemovePermission"], "Resource": "arn:aws:lambda:$REGION:$ACCOUNT_ID:function:TicketApiFunction" },
+    { "Sid": "TableScoped", "Effect": "Allow", "Action": ["dynamodb:CreateTable","dynamodb:DescribeTable","dynamodb:DeleteTable","dynamodb:UpdateTable","dynamodb:TagResource","dynamodb:ListTagsOfResource"], "Resource": "arn:aws:dynamodb:$REGION:$ACCOUNT_ID:table/$STACK_NAME-*" },
+    { "Sid": "LogsScoped", "Effect": "Allow", "Action": ["logs:DescribeLogGroups","logs:ListTagsForResource","logs:CreateLogGroup","logs:PutRetentionPolicy","logs:TagResource","logs:DeleteLogGroup"], "Resource": "arn:aws:logs:$REGION:$ACCOUNT_ID:log-group:/aws/lambda/TicketApiFunction*" },
+    { "Sid": "CFNRolesLifecycle", "Effect": "Allow", "Action": ["iam:CreateRole","iam:GetRole","iam:GetRolePolicy","iam:PutRolePolicy","iam:DeleteRolePolicy","iam:DeleteRole","iam:TagRole","iam:UntagRole","iam:ListRolePolicies","iam:ListAttachedRolePolicies","iam:ListInstanceProfilesForRole","iam:UpdateAssumeRolePolicy"], "Resource": "arn:aws:iam::$ACCOUNT_ID:role/$STACK_NAME-*" },
     { "Sid": "PassRoleToStackRolesOnly", "Effect": "Allow", "Action": "iam:PassRole", "Resource": "arn:aws:iam::$ACCOUNT_ID:role/subdesk-api-dev-*", "Condition": { "StringEquals": { "iam:PassedToService": "lambda.amazonaws.com" } } },
     { "Sid": "WhoAmI", "Effect": "Allow", "Action": "sts:GetCallerIdentity", "Resource": "*" }
   ]

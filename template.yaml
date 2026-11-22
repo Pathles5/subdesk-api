@@ -6,7 +6,7 @@
 # Lambda resource-policy statement that AuthType: NONE requires.
 # Secrets are NEVER stored here: they arrive as NoEcho Parameters injected in CI
 # with --parameter-overrides from GitHub Secrets (Fase 08 workflow).
-# Single region: us-east-1 (deploy-time only; the template declares no region).
+# Single region per stack: the target is declared once in infra/deployment.env (D-54); the template itself declares no region.
 # Validation gate: `cfn-lint template.yaml` (offline, no credentials — I7/D-31),
 # exit 0, no suppressed rules.
 

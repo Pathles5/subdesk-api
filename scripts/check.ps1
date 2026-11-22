@@ -301,11 +301,20 @@ if (Test-Path $workflowDir) {
         # (repo:OWNER@OWNER_ID/REPO@REPO_ID:environment:dev) - without the job environment there are
         # simply no AWS credentials, so the invariant is still fail-closed. Checked PER JOB: a
         # file-level match elsewhere would prove nothing (the pre-D-48 assert only grepped the file).
+        #
+        # Audited 2026-11-22 with two throwaway workflows, because the assert's wording was false in
+        # one of them: GitHub DOES accept a top-level `environment:` and applies it to jobs without
+        # their own, so this check is STRICTER than GitHub on purpose - this repo pins the environment
+        # per job so that "which job can reach AWS" is readable job by job (and reviewable by
+        # Get-JobBlocks). The top-level form is therefore forbidden outright, see the next assert.
         $awsMutate = "(?i)(sam\s+deploy|sam\s+package|sam\s+delete|create-change-set|execute-change-set|delete-stack|cloudformation\s+deploy)"
+        if ($wRaw -match "(?m)^environment:") {
+            Add-Fail ("{0}: 'environment:' declared at WORKFLOW level - this repo pins it per job instead (spec 04 §5.1/§5.4, D-42/D-48): a top-level default makes 'which job can reach AWS' unreadable and lets a future job inherit AWS credentials silently." -f $w.Name)
+        }
         foreach ($jb in (Get-JobBlocks $wRaw)) {
             if ($jb.Body -match $awsMutate) {
                 if ($jb.Body -notmatch "(?m)^    environment:") {
-                    Add-Fail ("{0}: job '{1}' mutates AWS state without a job-level 'environment:' - the OIDC claim binding and secret scope (spec 04 §5.1/§5.4, D-42/D-43/D-48) would be lost." -f $w.Name, $jb.Id)
+                    Add-Fail ("{0}: job '{1}' mutates AWS state without a job-level 'environment:' - per-job secret scope and per-job OIDC claim binding (spec 04 §5.1/§5.4, D-42/D-43/D-48/D-50) are not auditable." -f $w.Name, $jb.Id)
                 }
             }
             # D-31, re-anchored 2026-11-22: the previous form was '(?i)^\s*...sam\s+build\b' matched
@@ -317,6 +326,15 @@ if (Test-Path $workflowDir) {
             $cmdText = (($jb.Body -split "`r?`n") | Where-Object { $_ -notmatch '^\s*(-\s+)?(name|description|label|id)\s*:' }) -join "`n"
             if ($cmdText -match "(?i)\bsam\s+build\b") {
                 Add-Fail ("{0}: job '{1}' invokes 'sam build' - forbidden in CI and gates (D-31); packaging is scripts/package-lambda.mjs staging." -f $w.Name, $jb.Id)
+            }
+            # D-53 / closure of A-03.5: this repo keeps ZERO muted failures. A step with
+            # continue-on-error turns a real regression (policy drift, a permission pulled) into a
+            # yellow step - the exact signal we committed to surfacing. The tagging step's flag was
+            # retired once run #4 proved the call can succeed, so any future use needs a written
+            # justification in an amendment: surfaced here as an explicit note for the reviewer.
+            $muted = @([regex]::Matches($jb.Body, '(?m)^\s*continue-on-error:\s*true\s*(#.*)?$'))
+            if ($muted.Count -gt 0) {
+                Add-Note ("{0}: job '{1}' mutes {2} failure(s) with continue-on-error - verify it is justified in a spec amendment (A-03.5 was closed with zero muted failures, D-53)." -f $w.Name, $jb.Id, $muted.Count)
             }
         }
         # D-31 moved into the per-job command check above (it was unmatchable where it stood).
@@ -473,12 +491,68 @@ if ($cfnFiles.Count -gt 0) {
         Add-Note "IaC: SAM transform not detected in the scanned files (expected if using SAM syntax)."
     }
     if ($iacRaw -match 'arn:aws:iam::\*|Resource:\s*"?\*"') { Add-Fail "IaC asserts: wildcard IAM resource/policy detected (I4 least privilege)." }
-    # Single-region rule (I7; phase-00 debt closed in phase 03): every region literal must be us-east-1.
-    $regionLiterals = [regex]::Matches($iacRaw, '\b([a-z]{2}-[a-z]+-\d+)\b') | ForEach-Object { $_.Groups[1].Value } | Sort-Object -Unique
-    $foreignRegions = $regionLiterals | Where-Object { $_ -ne 'us-east-1' }
-    if ($foreignRegions) { Add-Fail "IaC asserts: non-us-east-1 region literal(s) found ($($foreignRegions -join ', ')) - the architecture is single-region us-east-1 (I2/I7)." }
-    elseif ($regionLiterals) { Add-Note "IaC: single region us-east-1 declared explicitly." }
-    else { Add-Note "IaC: no region literal in templates (fine - region is set at deploy time; keep it us-east-1 in the runbook)." }
+    # Single-region rule (I7) - REWRITTEN 2026-11-22 for D-54: the expected region is NO LONGER a
+    # literal inside this script. It is read from infra/deployment.env, the single source of truth of
+    # the deployment target, and every other region literal in the repo's executable artefacts (IaC,
+    # workflows, the bootstrap script) must equal it. That is what makes "deploy in any region" safe:
+    # a half migration (env file moved, role policy or workflow left behind) fails the gate instead of
+    # failing a deploy. Before this, the same assert hardcoded us-east-1 and only scanned IaC files, so
+    # a real edit of AWS_REGION in deploy.yml passed with [PASS] while breaking the pipeline.
+    $deployEnv = Join-Path $RepoRoot "infra/deployment.env"
+    # Workflow files are scanned too (they are where the region is actually applied at deploy time).
+    $execScan = @()
+    if (Test-Path $workflowDir) {
+        $execScan = @(Get-ChildItem $workflowDir -File -Include *.yml,*.yaml -Recurse | ForEach-Object { $_.FullName })
+    }
+    if (-not (Test-Path $deployEnv)) {
+        Add-Fail "Region asserts: infra/deployment.env is missing - since D-54 it is the single source of truth for AWS_REGION/STACK_NAME/ARTIFACTS_BUCKET and the gate requires it."
+    } else {
+        $envMap = @{}
+        foreach ($line in (Get-Content $deployEnv -Encoding UTF8)) {
+            if ($line -match '^\s*#') { continue }
+            $kv = $line -split '=', 2
+            if ($kv.Length -eq 2) { $envMap[$kv[0].Trim()] = $kv[1].Trim() }
+        }
+        $expectedRegion = $envMap['AWS_REGION']
+        if (-not $expectedRegion) { Add-Fail "Region asserts: infra/deployment.env declares no AWS_REGION." }
+        else {
+            Write-Verbose ("Region asserts: source of truth AWS_REGION={0}" -f $expectedRegion)
+            $scanTargets = @($cfnFiles) + @($execScan)
+            $bootstrapForRegion = Join-Path $RepoRoot "docs/specs/04-pipeline/bootstrap-oidc-cli.sh"
+            if (Test-Path $bootstrapForRegion) { $scanTargets += $bootstrapForRegion }
+            $offenders = @()
+            foreach ($f in $scanTargets) {
+                $raw = Get-Content $f -Raw -Encoding UTF8
+                $lits = [regex]::Matches($raw, '\b([a-z]{2}-(?:east|west|north|south|central)-\d)\b') | ForEach-Object { $_.Groups[1].Value } | Sort-Object -Unique
+                $bad = @($lits | Where-Object { $_ -ne $expectedRegion })
+                if ($bad.Count -gt 0) { $offenders += ("{0}: {1}" -f (Split-Path $f -Leaf), ($bad -join ', ')) }
+            }
+            if ($offenders.Count -gt 0) {
+                Add-Fail ("Region asserts: region literal(s) other than the declared {0} found in {1} - the target is set once in infra/deployment.env (D-54); a partial region migration must fail the gate, not the deploy." -f $expectedRegion, ($offenders -join ' | '))
+            } else {
+                Add-Note ("Region asserts: every region literal in IaC, workflows and the bootstrap script equals infra/deployment.env ({0})." -f $expectedRegion)
+            }
+            # The executor must not hardcode a region at all: it reads it from the source of truth.
+            foreach ($f in @($execScan)) {
+                $raw = Get-Content $f -Raw -Encoding UTF8
+                $m = [regex]::Match($raw, '(?m)^\s*AWS_REGION:\s*(\S+)\s*(#.*)?$')
+                if ($m.Success -and $m.Groups[1].Value -notmatch '\$\{\{') {
+                    Add-Fail ("Region asserts: {0} hardcodes AWS_REGION: {1} - load it from infra/deployment.env (D-54) so one edit moves the deployment." -f (Split-Path $f -Leaf), $m.Groups[1].Value)
+                }
+            }
+            # The artifacts bucket name must carry the region: S3 names are a GLOBAL namespace, so a
+            # second region cannot reuse the first one's bucket (this is what the run #4 bucket taught).
+            $bucket = $envMap['ARTIFACTS_BUCKET']
+            if ($bucket -and $expectedRegion) {
+                $regionToken = ($expectedRegion -replace '-', '')
+                if ($bucket -notlike "*$regionToken*") {
+                    Add-Fail ("Region asserts: ARTIFACTS_BUCKET '{0}' does not carry the region token '{1}' - S3 bucket names are global, so per-region deployments need per-region names (D-54)." -f $bucket, $regionToken)
+                } else {
+                    Add-Note ("Region asserts: artifacts bucket is region-scoped ({0})." -f $bucket)
+                }
+            }
+        }
+    }
 } else {
     Add-Note "No IaC template yet (template.yaml) - expected before phase 03."
 }

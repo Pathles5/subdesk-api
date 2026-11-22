@@ -1,0 +1,22 @@
+# Line-ending policy (added 2026-11-22 with D-54, region parametrization).
+#
+# WHY THIS FILE EXISTS
+# `infra/deployment.env` is SOURCED by shell (`set -a; . infra/deployment.env`) both in the
+# workflows' `load-deploy-config` step and in docs/specs/04-pipeline/bootstrap-oidc-cli.sh. If git
+# ever rewrites that file with CRLF, the shell reads `AWS_REGION=eu-west-1\r` and the CR is carried
+# into every `--region "$AWS_REGION"` / ARN / bucket call. That failure mode is invisible in CI
+# (Linux runners check out LF) and shows up locally — the worst possible split, because the green
+# pipeline would be lying about the value the operator actually deploys with.
+#
+# Scoped on purpose: NO `* text=auto` line, so nothing else in the repo gets renormalized and this
+# change produces no line-ending churn in files that are already committed.
+*.sh text eol=lf
+*.env text eol=lf
+*.mjs text eol=lf
+*.js text eol=lf
+*.yml text eol=lf
+*.yaml text eol=lf
+# PowerShell scripts run on Linux in CI (pwsh) and on Windows locally; LF is valid for both and
+# keeps `scripts/check.ps1` byte-identical between the two, which matters because its asserts are
+# regex over file content.
+*.ps1 text eol=lf

@@ -20,14 +20,14 @@ info:
 
     Autenticacion del panel: cabecera `x-api-key` (comparacion con `ADMIN_API_KEY`, `crypto.timingSafeEqual`). `401` si falta o esta vacia; `403` si no coincide. La comprobacion ocurre antes de tocar DynamoDB.
 
-    Esta URL es un placeholder: la real es la Lambda Function URL que resulte del despliegue (Fase 08) y queda registrada en `README.md`.
+    Esta URL es un placeholder: la real es la Lambda Function URL que resulte del primer apilado por pipeline (Fase 04) y queda registrada en `README.md`.
 
     Contract freeze (I3): esta definicion es vinculante para el panel frontend. Cualquier cambio es enmienda documentada en `docs/specs/01-modelo-contratos/spec.md` + decision en `DECISIONS.md`. El `id` es UUID v5 determinista (D-19; I3 enmendada en D-35) — para el panel sigue siendo un opaco.
   contact:
     name: SubDesk API — contracto mantenido por el orquestador
 servers:
-  - url: https://REPLACE_ME.lambda-url.us-east-1.on.aws
-    description: Lambda Function URL (placeholder; valor real tras el deploy de Fase 08, I6)
+  - url: https://REPLACE_ME.lambda-url.eu-west-1.on.aws
+    description: "Lambda Function URL (placeholder; el valor real llega con el primer apilado por pipeline, Fase 04, I6). La region del host no es un literal propio: se declara una vez en infra/deployment.env (D-54)."
 
 tags:
   - name: webhook
@@ -260,7 +260,7 @@ components:
       name: X-Telegram-Bot-Api-Secret-Token
       in: header
       required: true
-      description: Debe coincidir exactamente con `TELEGRAM_WEBHOOK_SECRET` (registrado via `setWebhook`, Fase 08).
+      description: Debe coincidir exactamente con `TELEGRAM_WEBHOOK_SECRET` (registrado via `setWebhook` en Fase 09).
       schema:
         type: string
         minLength: 1

@@ -1,12 +1,19 @@
 %% deployment.mmd — despliegue SubDesk API: del repo a los recursos reales del template.yaml
-%% Actualizado: fase 04 · 2026-11-22
+%% Actualizado: fase 04 · 2026-11-22 (tanda D-52/D-54/D-55: nudos preflight-parameters y
+%% load-deploy-config en el orden real del job deploy; etiqueta de region eu-west-1;
+%% nudo OIDC al dia: T-17 done / D-55).
 %% Fuente versionada; el .svg se regenera con `pnpm run docs:diagrams` (D-33/D-41, local, sin CDN).
-%% Coherente con template.yaml A-01 (Fase 03): 7 recursos, region us-east-1 fijada en el deploy.
+%% Estado del derivado: .svg CREADO Y REGENERADO por el orquestador (2026-11-22 16:50, 226.324 B;
+%% component.svg re-exportado en la misma corrida). Nada pendiente de export en esta fuente.
+%% Coherente con template.yaml A-01 (Fase 03): 7 recursos. Region del destino: eu-west-1,
+%% declarada UNA sola vez en infra/deployment.env y cargada por load-deploy-config (D-54 / A-07);
+%% el template es region-agnóstico por diseño (!Sub ${AWS::Region}) — cero literales en el IaC.
 %% Modelo de visto D-48 / spec 04 A-03: NO hay aprobacion manual en Actions (environment dev
 %% sin required reviewers) — el visto es la accion que arranca el workflow. El candado es la
 %% politica de ramas (solo main, can_admins_bypass false) + el claim OIDC del trust (D-43).
-%% D-50/A-05: el claim del nudo ENVID es la forma INMUTABLE (repo creado 2026-11-17); el
-%% .svg exportado debe regenerarse con `pnpm run docs:diagrams` para reflejar esta linea.
+%% D-50/A-05: el claim del nudo ENVID es la forma INMUTABLE (repo creado 2026-11-17).
+%% D-52/A-06: el nudo PREFLIGHT es el primer paso ejecutable del job deploy — falla con cero
+%% contacto con AWS, por eso va ANTES de credenciales y antes de load-deploy-config.
 flowchart LR
     subgraph dev["Desarrollo (local)"]
         REPO["repo git<br/>src/ + template.yaml"]
@@ -17,13 +24,15 @@ flowchart LR
 
     subgraph ci["GitHub Actions — pipeline (Fase 04; D-42: unico ejecutor de AWS)"]
         Wf["deploy.yml<br/>verify → package<br/>compuertas + ZIP determinista<br/>nodeLinker hoisted (D-31)"]
+        PREFLIGHT["preflight-parameters (D-52 / A-06)<br/>primer paso ejecutable del job deploy<br/>AllowedPattern leidos del propio template.yaml<br/>aborta con exit!=0: CERO contacto con AWS<br/>nunca imprime valor, longitud ni hash (I4)"]
+        LOADCFG["load-deploy-config (D-54 / A-07)<br/>fuente unica infra/deployment.env<br/>AWS_REGION=eu-west-1 · STACK_NAME · ARTIFACTS_BUCKET(-euwest1)<br/>despues del pre-vuelo, antes del OIDC"]
         ENVID["environment: dev<br/>scope de secretos + claim OIDC<br/>sub = repo:Pathles5@43617338/subdesk-api@1462037116:environment:dev (INMUTABLE, D-50)"]
         SECRETS["Secretos del environment<br/>TELEGRAM_BOT_TOKEN · ADMIN_API_KEY<br/>TELEGRAM_WEBHOOK_SECRET"]
     end
 
-    OIDC["STS via OIDC<br/>SubDeskCiDeployRole · role-to-assume<br/>cero claves de largo vivir (D-43)<br/>policy auditada (A-03.3 / D-49)"]
+    OIDC["STS via OIDC<br/>SubDeskCiDeployRole · role-to-assume<br/>cero claves de largo vivir (D-43)<br/>policy auditada (A-03.3 / D-49) y<br/>RE-EMITIDA con ARNs eu-west-1 (T-17 done / D-55)<br/>trust intacto: el probado en el run #4 (D-50/D-51)"]
 
-    subgraph cfn["CloudFormation stack (us-east-1) — SAM transform D-15"]
+    subgraph cfn["CloudFormation stack (eu-west-1 — declarado en infra/deployment.env, D-54) — SAM transform D-15"]
         TABLE[("TicketsTable<br/>PROVISIONED 25/25 · Standard<br/>PK id(S) · sin indices · SSE<br/>I2/D-26")]
         FN["TicketApiFunction<br/>nodejs22.x · x86_64 · 256 MB · 30s<br/>handler src/lambda.handler<br/>D-27/D-40"]
         URL["TicketApiUrlConfig<br/>AWS::Lambda::Url · AuthType NONE<br/>CORS unica fuente (I4)"]
@@ -36,10 +45,10 @@ flowchart LR
     PANEL["Panel frontend<br/>(externo, x-api-key)"]
 
     REPO --> GATES --> VISTO --> Wf
-    Wf --- ENVID
+    Wf --> PREFLIGHT --> LOADCFG --> ENVID
     SECRETS -. "--parameter-overrides (NoEcho)" .-> Wf
     ENVID -- "claim que exige el trust" --> OIDC
-    OIDC -- "sam package + sam deploy (sin aprobacion previa)" --> cfn
+    OIDC -- "sam package + sam deploy (sin aprobacion previa; bucket y region del destino via load-deploy-config, D-54)" --> cfn
     FN --> TABLE
     ROLE -. "asume" .-> FN
     FN -. "ARN destino" .-> URL

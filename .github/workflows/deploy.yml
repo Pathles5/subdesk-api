@@ -8,8 +8,13 @@
 # is NOT an approval gate: by the user's explicit decision (D-48) it carries NO
 # required reviewers and nothing ever waits in Actions. What it does provide is
 # fail-closed security: it is the scope holding the app and deploy-context secrets,
-# and it fixes the OIDC subject claim to `repo:Pathles5/subdesk-api:environment:dev`,
-# which is the StringEquals condition of the SubDeskCiDeployRole trust (D-43). Remove
+# and it fixes the OIDC subject claim to the INMUTABLE form `repo:Pathles5@43617338/
+# subdesk-api@1462037116:environment:dev`, which is the StringEquals condition of the
+# SubDeskCiDeployRole trust (D-43; D-50/D-51: this repo was created 2026-11-17, after
+# GitHub's 2026-07-15 cutoff, so only the immutable form is ever minted — the legacy
+# name-only claim is not emitted here and pinning it made runs #2/#3 red. The live
+# format is audited against the official endpoint
+# `gh api repos/Pathles5/subdesk-api/actions/oidc/customization/sub`). Remove
 # the environment pin from a job that touches AWS and the role assumption is denied —
 # no credentials, no deploy.
 # Consequence of D-48 to keep in mind: every push to main runs a full deploy, docs-only
@@ -21,7 +26,9 @@
 # Identity: OIDC ONLY (D-43). No static AWS keys are referenced anywhere in this
 # file (spec §5.3; check.ps1 asserts it). Secrets (spec §5.4): the three app
 # secrets live only in the `dev` environment and travel exclusively through
-# step-level `env:` blocks into --parameter-overrides / the smoke script. Their
+# step-level `env:` blocks into three consumers: the preflight-parameters gate step
+# (A-06, runs before any AWS contact), sam deploy's --parameter-overrides, and the
+# smoke script. Their
 # VALUES are never echoed, printed, or interpolated into any log line.
 #
 # Packaging chain — staging=artifact (D-31 + runbook §2.5 hazard D3, orchestrator
@@ -60,16 +67,18 @@ concurrency:
   group: subdesk-api-dev-deploy
   cancel-in-progress: true
 
-env:
-  # Single-region invariant (I2/D-26): us-east-1 everywhere. Literals kept in plain
-  # sight for the audit; region is NOT read from a secret/variable.
-  AWS_REGION: us-east-1
-  STACK_NAME: subdesk-api-dev
-  # Artifacts bucket: the CI role's S3 statement only admits arn aws-sam-cli-managed-*,
-  # so the name must live under that prefix. --resolve-s3 is NOT used: its managed-bucket
-  # provisioning path in v1.174.0 is not provable inside this role's permissions, and a
-  # plain create-bucket (s3:CreateBucket IS in the policy) keeps the flow auditable.
-  SAM_BUCKET: aws-sam-cli-managed-subdesk-api-dev-artifacts
+# No workflow-level `env:` block since D-54 (spec 04 A-07): the deployment target — region,
+# stack name, artifacts bucket, account — is declared ONCE, in `infra/deployment.env`, and each
+# AWS-facing job loads it through its `load-deploy-config` step. One edit now moves the whole
+# deployment; check.ps1 fails (1) any workflow that hand-fixes AWS_REGION and (2) any region
+# literal in the executor that differs from the declared one, so a half-done migration breaks
+# the gate instead of a live deploy. The single-region invariant (I2/D-26) is about exactly ONE
+# region per stack — never about the region's NAME, so no region literal belongs in this file.
+# The artifacts bucket keeps living under the aws-sam-cli-managed-* prefix (the only thing the
+# CI role's S3 statement admits) and --resolve-s3 is still NOT used (its managed-bucket
+# provisioning path in v1.174.0 is not provable inside this role's permissions, and a plain
+# create-bucket keeps the flow auditable). Its name carries a region suffix because S3 bucket
+# names are a GLOBAL namespace — see bootstrap-bucket below and infra/deployment.env.
 
 jobs:
   verify:
@@ -182,6 +191,72 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: preflight-parameters — validate deploy-time secrets against the template contract (A-06)
+        # Placement is deliberate: this is the FIRST executable step of the job, running
+        # before the OIDC token is minted and before any AWS call, so a secret outside the
+        # template contract aborts with ZERO contact with AWS — the "nothing was sent to
+        # AWS" promise of scripts/preflight-parameters.mjs, provable in the run log (no
+        # credentials step output, no S3/CloudFormation traffic at all).
+        # Why the gate exists: CloudFormation validates Parameters ONE AT A TIME, so each
+        # non-compliant GitHub environment secret costs one whole run to reveal one bad
+        # value. Run #4 (45031395062, commit 7f20628) is the evidence: OIDC,
+        # bootstrap-bucket, tagging and `sam package` all passed, and only then did
+        # `sam deploy` die in CreateChangeSet with `Parameter 'WebhookSecretParam' must
+        # match pattern ^\S{16,}$` — zero resources created and zero signal about the
+        # other two secrets. Registered as spec 04 A-06 / D-52.
+        # The rules are NOT duplicated here: the script parses each NoEcho parameter's
+        # AllowedPattern from template.yaml itself, so the check can never drift from the
+        # contract CFN enforces. This step needs ONLY the checkout (script + template on
+        # disk) and the runner's stock Node: no id-token use, no credentials, no SAM, no
+        # pnpm, no setup-node (the job installs nothing — D-31).
+        # I4: the printed output is only `param (SECRET_NAME) OK|BAD|MISSING - must match
+        # <rule>` — names and the rule, NEVER a value, a length, a prefix or a hash. The
+        # three secrets enter exclusively through this env block, which works because the
+        # job pins `environment: dev` (spec 04 §5.4 — without the pin the secrets resolve
+        # empty and the step reports MISSING, still failing closed).
+        # No continue-on-error: exit != 0 aborts the job (default `run:` behavior).
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          ADMIN_API_KEY: ${{ secrets.ADMIN_API_KEY }}
+          TELEGRAM_WEBHOOK_SECRET: ${{ secrets.TELEGRAM_WEBHOOK_SECRET }}
+        run: node scripts/preflight-parameters.mjs
+
+      - name: load-deploy-config — single source of truth for region and names (D-54)
+        # Sources infra/deployment.env (the deployment-target contract of spec 04 A-07) and
+        # hands its four executable values to every later step through $GITHUB_ENV:
+        # AWS_REGION and STACK_NAME as-is, SAM_BUCKET from ARTIFACTS_BUCKET, AWS_ACCOUNT_ID.
+        # Placement is deliberate and audited by ordering, twice:
+        #   * AFTER preflight-parameters (A-06/D-52): the secret-contract gate stays the FIRST
+        #     executable step and needs none of these values — the "zero AWS contact" promise
+        #     is not weakened by anything here (this step touches no AWS either; it only reads
+        #     a committed names file).
+        #   * BEFORE Configure AWS credentials via OIDC: that step resolves
+        #     `aws-region: ${{ env.AWS_REGION }}` from the GITHUB_ENV written by THIS step
+        #     ($GITHUB_ENV only feeds subsequent steps). The order is load-bearing: with
+        #     OIDC above this line the reference resolves EMPTY and the credential step
+        #     fails outright — loud, not silent, but a broken run. Do not reorder.
+        # Why the local `SAM_BUCKET="$ARTIFACTS_BUCKET"` assignment: $GITHUB_ENV reaches LATER
+        # steps only, so a name exported here is NOT defined inside this step's own shell, and
+        # `set -u` turns any same-step reference to it into a hard abort before any AWS call.
+        # That was a real bug (run #5 would have died in this step, not in AWS), caught by
+        # tests/pipeline/github-env-exports.test.js; the assignment keeps the exported name and
+        # the locally logged name identical, so a future rename cannot drift silently
+        # (spec 04 A-07).
+        # Fail-closed by construction: `set -u` aborts the job if the file or any expected key
+        # is missing. Zero secrets here by design — the file holds names only, which is exactly
+        # why it is committed (spec 04 §5.4 still scopes every secret to the dev environment).
+        run: |
+          set -euo pipefail
+          set -a; . infra/deployment.env; set +a
+          SAM_BUCKET="$ARTIFACTS_BUCKET"
+          {
+            echo "AWS_REGION=$AWS_REGION"
+            echo "STACK_NAME=$STACK_NAME"
+            echo "SAM_BUCKET=$SAM_BUCKET"
+            echo "AWS_ACCOUNT_ID=$AWS_ACCOUNT_ID"
+          } >> "$GITHUB_ENV"
+          echo "deploy target loaded: region=$AWS_REGION stack=$STACK_NAME bucket=$SAM_BUCKET account=$AWS_ACCOUNT_ID"
+
       - name: Configure AWS credentials via OIDC (no static keys — D-43)
         uses: aws-actions/configure-aws-credentials@v4
         with:
@@ -231,7 +306,9 @@ jobs:
         # human click, since there are no required reviewers (D-48) — and would replay
         # configure-aws-credentials for zero safety gain.
         # s3:CreateBucket / ListBucket (head-bucket) / PutLifecycleConfiguration are all
-        # in SubDeskCiDeployPolicy's SAMArtifactBucket statement (bootstrap §2).
+        # in the SubDeskCiDeployPolicy SAMArtifactBucket statement (bootstrap §2).
+        # $SAM_BUCKET and $AWS_REGION no longer come from a workflow-level env: the
+        # load-deploy-config step above exported them from infra/deployment.env (D-54).
         # 30-day object expiry mirrors the I2 log-retention rule and keeps the bucket
         # ~$0 forever (a few MB inside the S3 free tier; the <$0.01/mes cost of the
         # artifacts bucket itself was accepted in D-15).
@@ -240,8 +317,28 @@ jobs:
           if aws s3api head-bucket --bucket "$SAM_BUCKET" 2>/dev/null; then
             echo "Bucket $SAM_BUCKET exists: reusing it."
           else
-            echo "Creating $SAM_BUCKET (name must sit under the aws-sam-cli-managed-* prefix the CI role allows)."
-            aws s3api create-bucket --bucket "$SAM_BUCKET" --region "$AWS_REGION"
+            echo "Creating $SAM_BUCKET (name must sit under the aws-sam-cli-managed-* prefix the CI role allows, and carry the region suffix: S3 bucket names are a GLOBAL namespace — the first runs already burned the unsuffixed name in the legacy region, D-54)."
+            # The classic create-bucket trap (spec 04 A-07): in EVERY region except the
+            # legacy one, `aws s3api create-bucket` WITHOUT an explicit
+            # --create-bucket-configuration LocationConstraint=$AWS_REGION fails with
+            # IllegalLocationConstraintException — and in the legacy region itself,
+            # PASSING any LocationConstraint is exactly what the API rejects. The branch
+            # is unavoidable; the trap is why this step does not just pass the flag
+            # unconditionally.
+            # The legacy region is matched by NAME SHAPE (the only live region named
+            # two-letters + "-east-1") instead of by a hardcoded literal, on purpose:
+            # since D-54 check.ps1 fails any region literal in .github/** other than the
+            # one declared in infra/deployment.env, so writing its name here would turn
+            # every future region migration into a gate hunt.
+            case "$AWS_REGION" in
+              [a-z][a-z]-east-1)
+                aws s3api create-bucket --bucket "$SAM_BUCKET" --region "$AWS_REGION"
+                ;;
+              *)
+                aws s3api create-bucket --bucket "$SAM_BUCKET" --region "$AWS_REGION" \
+                  --create-bucket-configuration LocationConstraint=$AWS_REGION
+                ;;
+            esac
           fi
           aws s3api put-bucket-lifecycle-configuration \
             --bucket "$SAM_BUCKET" \
@@ -253,13 +350,20 @@ jobs:
         # A-03.3 audited version was applied in AWS under D-49 (SAMArtifactBucket sid
         # re-read after the put-role-policy; simulate-principal-policy 22/22 allowed),
         # so this step is NO LONGER expected to show AccessDenied — if it ever does,
-        # that is a policy-drift regression, not a known gap. continue-on-error: true
-        # stays deliberately until this step is seen SUCCEED once in a real deploy:
-        # the flag no longer masks a foreseen failure, it only keeps a first-run
-        # cosmetic tagging error from blocking the stack while that one-bit evidence
-        # is collected. Removing the flag is the next hardening step once confirmed
-        # (recorded as an F09 pending in spec A-03; do not drop it here instead).
-        continue-on-error: true
+        # that is a policy-drift regression, not a known gap.
+        # The continue-on-error: true that used to sit on this step is RETIRED HERE,
+        # on the user's explicit authorization (A-06/D-52 batch). Its own retirement
+        # condition — seen SUCCEED once in a real deploy — is SATISFIED by run #4
+        # (45031395062, commit 7f20628, 2026-11-22T14:12Z), where this step reported
+        # success with s3:PutBucketTagging granted since the A-03.3 audited policy
+        # applied under D-49. Past that evidence the flag guarded against nothing
+        # foreseen, and keeping it any longer would turn any real regression (policy
+        # drift, the permission pulled, a bucket with another config) into a silent
+        # yellow — precisely the signal we committed to surfacing (D-49/A-03). The
+        # A-03 -> F09 pending is CLOSED by this edit; recorded in spec 04 with A-03
+        # as the origin of the pending and A-06/D-52 as the batch executing the
+        # closure. An AccessDenied here on is a regression to investigate — never a
+        # known gap to re-mask with a flag.
         run: |
           aws s3api put-bucket-tagging \
             --bucket "$SAM_BUCKET" \
@@ -320,6 +424,22 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
+
+      - name: load-deploy-config — same single source of truth as the deploy job (D-54)
+        # Identical loader: the OIDC step below resolves `aws-region: ${{ env.AWS_REGION }}`
+        # from this step's $GITHUB_ENV output, and describe-stacks needs $STACK_NAME; smoke
+        # consumes only those two, but all four keys are exported for symmetry with the
+        # deploy job so the two jobs can never disagree on the target they describe.
+        run: |
+          set -euo pipefail
+          set -a; . infra/deployment.env; set +a
+          {
+            echo "AWS_REGION=$AWS_REGION"
+            echo "STACK_NAME=$STACK_NAME"
+            echo "SAM_BUCKET=$ARTIFACTS_BUCKET"
+            echo "AWS_ACCOUNT_ID=$AWS_ACCOUNT_ID"
+          } >> "$GITHUB_ENV"
+          echo "smoke target loaded: region=$AWS_REGION stack=$STACK_NAME"
 
       - name: Setup Node 22 for smoke-live.mjs (zero-dependency script)
         uses: actions/setup-node@v4

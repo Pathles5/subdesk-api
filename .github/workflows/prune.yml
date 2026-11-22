@@ -9,10 +9,14 @@
 #       typed by that human (verify-approval fails closed on anything else,
 #       case-sensitive).
 # Note on the `destroy` job's `environment: dev`: it contributes the secrets and the
-# OIDC `sub` claim (`repo:Pathles5/subdesk-api:environment:dev`) that SubDeskCiDeployRole's
-# trust condition demands, so a job without the pin simply gets no credentials (D-43,
-# fail-closed). It is NOT a human reviewer: by the user's explicit decision (D-48) the
-# environment carries no required reviewers and nothing waits for an approval click.
+# OIDC `sub` claim in its INMUTABLE form (`repo:Pathles5@43617338/subdesk-api@1462037116:
+# environment:dev` — D-50/D-51: post-2026-07-15 repo, so the legacy name-only claim is
+# never minted here; format verified against
+# `gh api repos/Pathles5/subdesk-api/actions/oidc/customization/sub`) that
+# SubDeskCiDeployRole's trust condition demands, so a job without the pin simply gets
+# no credentials (D-43, fail-closed). It is NOT a human reviewer: by the user's explicit
+# decision (D-48) the environment carries no required reviewers and nothing waits for an
+# approval click.
 #
 # Identity: OIDC ONLY (D-43) — no static AWS keys referenced (spec §5.3; the
 # check.ps1 assert over .github/** must stay green).
@@ -22,12 +26,12 @@
 # group, the Function URL AND its AuthType:NONE resource-policy statement (deleting
 # the complete stack leaves no orphaned policy — runbook §4 note).
 #
-# What is NOT deleted: the SAM artifacts bucket (aws-sam-cli-managed-subdesk-api-dev-
-# artifacts). Its objects already expire after 30 days via the lifecycle rule that
-# deploy.yml guarantees on every run, so the residual cost is ~$0 (within S3 free
-# tier; the bucket itself was accepted in D-15 at <$0.01/mes). Deleting the bucket
-# would need s3:DeleteBucket/DeleteObject/PutBucketVersioning permissions the CI
-# role deliberately does NOT carry. Empty-while-deleting is also NOT attempted.
+# What is NOT deleted: the SAM artifacts bucket (ARTIFACTS_BUCKET in infra/deployment.env
+# — a per-region name since D-54). Its objects already expire after 30 days via the
+# lifecycle rule that deploy.yml guarantees on every run, so the residual cost is ~$0
+# (within S3 free tier; the bucket itself was accepted in D-15 at <$0.01/mes). Deleting
+# the bucket would need s3:DeleteBucket/DeleteObject/PutBucketVersioning permissions the
+# CI role deliberately does NOT carry. Empty-while-deleting is also NOT attempted.
 name: prune
 run-name: prune subdesk-api-dev (${{ github.event.inputs.confirm }})
 
@@ -43,7 +47,8 @@ on:
 
 permissions:
   id-token: write   # OIDC federation (D-43)
-  contents: read    # nothing is checked out, but least privilege stays explicit
+  contents: read    # since D-54 the destroy job checks the repo out — ONLY to read
+                    # infra/deployment.env (its region/stack source of truth); nothing else
 
 concurrency:
   # Same group as deploy.yml ("concurrency igual", T-04 brief): a prune dispatch
@@ -83,11 +88,32 @@ jobs:
     environment: dev
     timeout-minutes: 30
     steps:
+      - uses: actions/checkout@v4
+
+      - name: load-deploy-config — single source of truth for region and names (D-54)
+        # Same loader as deploy.yml's jobs: the region and stack name destroyed here are
+        # read from infra/deployment.env, never hardcoded, so prune can never target a
+        # different region than the one the deploy pipeline just moved to (the failure
+        # mode this parametrization exists to kill). `set -u` aborts fail-closed if the
+        # file or a key is missing — a missing file means NO delete call is issued at all.
+        # checkout is required for this step (the file lives in the repo); it was not
+        # needed before because the job's only inputs were secrets and literals.
+        run: |
+          set -euo pipefail
+          set -a; . infra/deployment.env; set +a
+          {
+            echo "AWS_REGION=$AWS_REGION"
+            echo "STACK_NAME=$STACK_NAME"
+            echo "SAM_BUCKET=$ARTIFACTS_BUCKET"
+            echo "AWS_ACCOUNT_ID=$AWS_ACCOUNT_ID"
+          } >> "$GITHUB_ENV"
+          echo "prune target loaded: region=$AWS_REGION stack=$STACK_NAME"
+
       - name: Configure AWS credentials via OIDC (no static keys — D-43)
         uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
-          aws-region: us-east-1   # single region (I2); same literal as deploy.yml
+          aws-region: ${{ env.AWS_REGION }}   # from infra/deployment.env via the step above — same source of truth as deploy.yml (D-54)
           role-session-name: github-subdesk-prune
 
       - name: Delete the stack and poll describe-stacks until DELETE_COMPLETE
@@ -108,13 +134,13 @@ jobs:
         # drift since D-49) to investigate, NOT a known gap to re-fix via bootstrap.
         run: |
           set -uo pipefail
-          aws cloudformation delete-stack --stack-name subdesk-api-dev --region us-east-1
+          aws cloudformation delete-stack --stack-name "$STACK_NAME" --region "$AWS_REGION"
           for i in $(seq 1 60); do
-            STATUS=$(aws cloudformation describe-stacks --stack-name subdesk-api-dev \
-              --region us-east-1 \
+            STATUS=$(aws cloudformation describe-stacks --stack-name "$STACK_NAME" \
+              --region "$AWS_REGION" \
               --query 'Stacks[0].StackStatus' --output text 2>/dev/null || true)
             if [ -z "$STATUS" ] || [ "$STATUS" = "None" ] || [ "$STATUS" = "DELETE_COMPLETE" ]; then
-              echo "Stack subdesk-api-dev is DELETE_COMPLETE (gone from describe-stacks)."
+              echo "Stack $STACK_NAME is DELETE_COMPLETE (gone from describe-stacks)."
               exit 0
             fi
             echo "poll $i: $STATUS"
