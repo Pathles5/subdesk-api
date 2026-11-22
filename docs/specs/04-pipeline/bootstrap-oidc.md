@@ -91,35 +91,26 @@ Repo → Settings → Environments → **New environment**: `dev`.
 |---|---|
 | 1. Provider OIDC | ✔ creado el 2026-11-20 — `arn:aws:iam::159177056493:oidc-provider/token.actions.githubusercontent.com` |
 | 2. Rol `SubDeskCiDeployRole` | ✔ **creado el 2026-11-22** vía `bootstrap-oidc-cli.sh` en CloudShell (provider existente saltado; trust `sub=repo:Pathles5/subdesk-api:environment:dev`; policy inline) — ARN: `arn:aws:iam::159177056493:role/SubDeskCiDeployRole` |
-| 3. Alertas de coste | ⚠️ **parcial**: existen alertas de cuenta €3 y €10 (usuario, 2026-11-22) — útiles pero NO son la evidencia I2. Falta el **budget mensual filtrado por tag `Project=subdesk-api` con umbral €0.01** (detector del céntimo; razón: peor caso ~14 €/mes — las alertas de 3/10 € saltan tarde y sin firma de proyecto) |
+| 3. Alertas de coste | ✔ **budget `subdesk-api-cent-detect` creado 2026-11-22** (0.01 USD, filtro `user:project$subdesk-api`; formato final en §3b) + alertas de cuenta €3/€10 preexistentes. ⏳ único resto: activar la clave `Project` en Cost allocation tags — imposible hasta el primer deploy (la consola no lista claves sin recursos etiquetados); es paso de T-07+ con recordatorio |
 | 4. Environment `dev` + secretos | ✔ environment, secretos y **`AWS_ROLE_ARN` pegado (2026-11-22)**; pendiente solo la confirmación visual de **Required reviewers = usuario** |
 | 5. Bot de prueba (@BotFather) | ✔ token guardado en el secreto `TELEGRAM_BOT_TOKEN` (usuario 2026-11-22) |
 
-**Resumen:** pasos 1, 2, 4 (ARN) y 5 ✔. Quedan dos: **(a)** crear el budget €0.01 con filtro tag `Project=subdesk-api` (comando abajo, §3b) y **(b)** confirmación visual de Required reviewers en el environment `dev`. Con eso, "bootstrap listo" y arrancan T-04/T-05.
+**Resumen:** pasos 1, 2, 3 (budget), 4 (ARN) y 5 ✔. Quedan para "bootstrap listo": **(a)** re-ejecutar `bootstrap-oidc-cli.sh` si el rol se creó ANTES de la ampliación de policy (logs:CreateLogGroup etc. — imprescindible para el primer deploy) y **(b)** confirmación visual de Required reviewers en el environment `dev`. El activar el tag `Project` se pospone estructuralmente a T-07+ (ver §3b).
 
-### 3b. Budget de €0.01 filtrado por tag — la evidencia I2 que faltan tus alertas de 3/10 €
+### 3b. Budget de 0.01 USD filtrado por tag — la evidencia I2 ✔ creada en dev el 2026-11-22
 
-Tus alertas de €3 y €10 son de **cuenta global**: saltan tarde (el peor caso de este proyecto son ~14 €/mes solo si la franquicia no aplicara, y €14 dispara la de €10 cuando ya vas dos meses desviado) y **sin firma de proyecto** (no distinguen un gasto del proyecto de uno de otro servicio). La evidencia que pide I2 es el **detector del céntimo con nombre propio**:
+`subdesk-api-cent-detect` existe. El formato **final verificado contra la API real** costó cuatro rechazos encadenados, y cada uno es instrucción para el cliente: (1) en **PowerShell 5.1** el literal `'{...}'` llega a `aws.exe` sin comillas dobles → usar **CloudShell/bash** o ficheros `file://`; (2) el suscriptor es **`Address`**, no `EmailAddress`; (3) `ThresholdType` admite el enum `FORECASTED_BREACH_IN_DAYS | ABSOLUTE_VALUE | PERCENTAGE` → **`ABSOLUTE_VALUE`**; (4) el filtro moderno es **`TagKeyValue`** con `scope:clave$valor` → `user:project$subdesk-api` (el antiguo `"Tag": ["clave/valor"]` ya no está en las dimensiones soportadas). Nota: la API **aceptó el filtro antes de existir recursos etiquetados** — el presupuesto queda montado y leerá USD 0 hasta el primer deploy; corrige mi previsión anterior ("créalo tras el deploy"): se puede y se debe crear antes.
 
 ```bash
-# 1) activa la etiqueta de coste (consola: Billing → Cost allocation tags → Project → Activate;
-#    tarda hasta 24 h en verse en el filtro del budget; es prerequisito del paso 2)
-# 2) crea el budget mensual filtrado por tag, alerta ACTUAL > 0.01 por email (sin SNS):
+# ELIMINAR del doc el comando viejo; el bueno verificado:
 aws budgets create-budget \
   --account-id 159177056493 \
-  --budget "{
-    \"BudgetName\": \"subdesk-api-cent-detect\",
-    \"BudgetType\": \"COST\",
-    \"TimeUnit\": \"MONTHLY\",
-    \"CostFilters\": { \"Tag\": [ \"project/subdesk-api\" ] },
-    \"BudgetLimit\": { \"Amount\": \"0.01\", \"Unit\": \"EUR\" }
-  }" \
-  --notifications-with-subscribers "[{
-    \"Notification\": { \"NotificationType\": \"ACTUAL\", \"ComparisonOperator\": \"GREATER_THAN\", \"Threshold\": 0.01, \"ThresholdType\": \"ABSOLUTE_VALUE\" },
-    \"Subscribers\": [ { \"SubscriptionType\": \"EMAIL\", \"Address\": \"TU_EMAIL\" } ]
-  }]"
+  --budget '{"BudgetName":"subdesk-api-cent-detect","BudgetType":"COST","TimeUnit":"MONTHLY","CostFilters":{"TagKeyValue":["user:project$subdesk-api"]},"BudgetLimit":{"Amount":"0.01","Unit":"USD"}}' \
+  --notifications-with-subscribers '[{"Notification":{"NotificationType":"ACTUAL","ComparisonOperator":"GREATER_THAN","Threshold":0.01,"ThresholdType":"ABSOLUTE_VALUE"},"Subscribers":[{"SubscriptionType":"EMAIL","Address":"<EMAIL>"}]}]'
+# verificacion:
+aws budgets describe-budgets --account-id 159177056493 --query "Budgets[].BudgetName" --output text
 ```
 
-**Campos que la API exige literalmente (verificado en vivo 2026-11-22, dos vueltas):** en `Subscribers[]` el email va en **`Address`**, no `EmailAddress`; y `ThresholdType` admite el enum **`FORECASTED_BREACH_IN_DAYS | ABSOLUTE_VALUE | PERCENTAGE`** — para el detector del céntimo es **`ABSOLUTE_VALUE`** con `Threshold: 0.01` (PERCENTAGE 0.01 sería "1 % del límite", otra cosa). En **Windows PowerShell** el literal `'{...}'` llega a `aws.exe` sin comillas dobles (PS 5.1 las destruye al invocar nativos) — pasar los JSON por ficheros `file:///$env:TEMP/budget.json`; en **CloudShell/bash** el comando funciona tal cual y es la vía recomendada también para re-ejecutar `bootstrap-oidc-cli.sh`.
+**La otra mitad del tag (el "segundo fleco") sigue pendiente por naturaleza, no por olvido:** *activar* la clave `Project` en Billing → Cost allocation tags requiere que la consola la vea, y solo la ve cuando existe al menos un recurso real etiquetado — es decir, **tras el primer deploy (T-07)**. Queda en el checklist post-deploy con recordatorio del orquestador; hasta entonces el detector grueso de la cuenta (alertas €3/€10, usuario 2026-11-22) cubre el intervalo.
 
 Cuando el paso 1–4 esté hecho, dime "bootstrap listo" y el orquestador: (a) verifica por lectura, (b) despacha T-04/T-05/T-06 (workflows + scripts + asserts), (c) te propone el push del workflow y el primer deploy lo apruebas tú **en la pestaña Actions** del PR/merge. Nada más toca AWS desde esta máquina: ni ahora ni después.
