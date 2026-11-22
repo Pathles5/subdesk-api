@@ -1,13 +1,16 @@
 %% deployment.mmd — despliegue SubDesk API: del repo a los recursos reales del template.yaml
-%% Actualizado: fase 04 · 2026-11-22 (tanda run #5: etiqueta PREFLIGHT con la evidencia real —
-%% el gate aborto el run 45044899842 con cero credenciales y cero llamadas AWS; tanda anterior
-%% D-52/D-54/D-55: nudos preflight-parameters y load-deploy-config en el orden real del job
-%% deploy; etiqueta de region eu-west-1; nudo OIDC al dia: T-17 done / D-55).
+%% Actualizado: fase 04 · 2026-11-22 (tanda stack vivo D-60/D-61/D-62: nudo FN con el runtime real
+%% nodejs26.x + arm64 (D-61, supersede D-40; public preview, riesgo asumido por el usuario); los DOS
+%% statements reales de la Function URL como nudos PERM y PERM2 (D-60) — el `Principal AWS:UrlInvoke`
+%% de la documentacion antigua NUNCA existio en produccion: Lambda lo rechaza; ambas aristas de
+%% permiso apuntan a la URL; tanda anterior run #5: etiqueta PREFLIGHT con la evidencia real).
 %% Fuente versionada; el .svg se regenera con `pnpm run docs:diagrams` (D-33/D-41, local, sin CDN).
 %% Estado del derivado: ultimo export del orquestador 2026-11-22 16:50:16, 226.324 B; la fuente
-%% cambio despues (esta etiqueta del run #5) ⇒ RE-EXPORT PENDIENTE por el orquestador con
-%% `pnpm run docs:diagrams` al cierre de la tanda.
-%% Coherente con template.yaml A-01 (Fase 03): 7 recursos. Region del destino: eu-west-1,
+%% cambio despues (esta tanda D-60/D-61/D-62 y la anterior del run #5) ⇒ RE-EXPORT PENDIENTE por
+%% el orquestador con `pnpm run docs:diagrams` al cierre de la tanda (el documentador no tiene
+%% permiso de shell).
+%% Coherente con template.yaml A-01 (Fase 03) + A-09/D-60: 1 tabla, 1 funcion, 1 URL, 1 rol,
+%% 1 log group y 2 Permission. Region del destino: eu-west-1,
 %% declarada UNA sola vez en infra/deployment.env y cargada por load-deploy-config (D-54 / A-07);
 %% el template es region-agnóstico por diseño (!Sub ${AWS::Region}) — cero literales en el IaC.
 %% Modelo de visto D-48 / spec 04 A-03: NO hay aprobacion manual en Actions (environment dev
@@ -36,9 +39,10 @@ flowchart LR
 
     subgraph cfn["CloudFormation stack (eu-west-1 — declarado en infra/deployment.env, D-54) — SAM transform D-15"]
         TABLE[("TicketsTable<br/>PROVISIONED 25/25 · Standard<br/>PK id(S) · sin indices · SSE<br/>I2/D-26")]
-        FN["TicketApiFunction<br/>nodejs22.x · x86_64 · 256 MB · 30s<br/>handler src/lambda.handler<br/>D-27/D-40"]
+        FN["TicketApiFunction<br/>nodejs26.x · arm64 · 256 MB · 30s<br/>handler src/lambda.handler<br/>D-27/D-61"]
         URL["TicketApiUrlConfig<br/>AWS::Lambda::Url · AuthType NONE<br/>CORS unica fuente (I4)"]
-        PERM["TicketApiUrlInvokePermission<br/>Principal AWS:UrlInvoke"]
+        PERM["TicketApiUrlInvokePermission<br/>Action lambda:InvokeFunctionUrl<br/>cond. FunctionUrlAuthType NONE<br/>(D-60: statement 1 de 2)"]
+        PERM2["TicketApiUrlInvokePermissionViaUrl<br/>Action lambda:InvokeFunction · Principal *<br/>cond. InvokedViaFunctionUrl true<br/>DependsOn TicketApiUrlInvokePermission<br/>(D-60: statement 2 de 2)"]
         ROLE["AppRole<br/>Get/Put/Update/Scan sobre la tabla<br/>CreateLogStream/PutLogEvents<br/>sobre SU log group (D-24)"]
         LOGS["ApiLogGroup<br/>/aws/lambda/TicketApiFunction<br/>retencion 30 dias (I2)"]
     end
@@ -54,7 +58,9 @@ flowchart LR
     FN --> TABLE
     ROLE -. "asume" .-> FN
     FN -. "ARN destino" .-> URL
-    PERM -. "habilita invoke" .-> URL
+    PERM -. "habilita invoke 1/2 (D-60)" .-> URL
+    PERM2 -. "habilita invoke 2/2 (D-60)" .-> URL
+    PERM2 -. "DependsOn: serializa AddPermission" .-> PERM
     FN --> LOGS
     TG -- "POST /webhook/telegram<br/>X-…-Secret-Token" --> URL
     PANEL -- "GET/PATCH/POST /api/*<br/>x-api-key" --> URL

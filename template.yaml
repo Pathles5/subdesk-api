@@ -97,11 +97,12 @@ Resources:
       # D-61 (supersedes D-40): nodejs26.x is in PUBLIC PREVIEW on Lambda — AWS
       # states preview runtimes are "not covered by the Lambda SLA or Technical
       # Support, and should not be used for production workloads" (runtime GA was
-      # expected ~Dec 2026); the user assumes that risk verbatim. The local engine
-      # stays v22.20.0, so the old D-40 rationale (local engine == runtime, minimal
-      # dev/prod drift) no longer holds: dev/prod parity is KNOWINGLY broken and
-      # recorded as accepted drift (check.ps1 "Runtime parity" keeps the CI Node
-      # major pinned to the runtime major and engines.node admitting it). arm64
+      # expected ~Dec 2026); the user assumes that risk verbatim. The local engine is
+      # v26.13.1 (measured with `node -v`, not inherited from the stale D-28 note that
+      # said v22.20.0), so the D-40 rationale (local engine == runtime, minimal
+      # dev/prod drift) STILL holds and parity is preserved — there is no accepted
+      # drift to record. check.ps1 "Runtime parity" keeps the CI Node major pinned to
+      # the runtime major and engines.node admitting it. arm64
       # (Graviton) is chosen for price/performance, coherent with I2, and is safe
       # for this artifact: the ZIP carries zero native (.node) binaries — prod deps
       # are express + serverless-http, pure JS (the repo's only .node file is a

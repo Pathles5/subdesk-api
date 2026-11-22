@@ -1,6 +1,6 @@
 # Arquitectura técnica — SubDesk API
 
-Actualizado: fase 03 · 2026-11-20
+Actualizado: fase 04 · 2026-11-22
 
 > Documento para quien va a mantener el código. Las decisiones con su historia están en `DECISIONS.md` (se enlazan por ID); los criterios por fase están en `docs/specs/`. El contrato de la API se publica en `docs/api/openapi.yaml` (nace en Fase 01).
 
@@ -22,7 +22,7 @@ Volumen previsto: bajo (una persona y sus agentes). Todas las decisiones optimiz
 ```
 Telegram ──POST──▶ ┌─────────────────────────────┐
                    │  Lambda Function URL (NONE) │  ← único endpoint público; sin cargo por petición
-Panel ──x-api-key─▶│  1× Lambda · Node ≥20 ESM │  ← 256 MB, 30 s máx de invocación HTTP (runtime exacto: Fase 03)
+Panel ──x-api-key─▶│ 1× Lambda · nodejs26.x ESM │  ← 256 MB, 30 s máx de invocación HTTP · arm64 (D-61)
                    │  Express app (router interno)│
                    └───────┬─────────────┬───────┘
                            │             │
@@ -35,12 +35,13 @@ Panel ──x-api-key─▶│  1× Lambda · Node ≥20 ESM │  ← 256 MB, 30
 - **Una sola función Lambda**, no una por endpoint: el enrutado lo hace Express dentro del proceso (D-27). Consecuencia: un error no capturado afecta a todas las rutas → por eso el router del webhook va aislado con su propio guard (I5).
 - **IaC: AWS SAM** (`template.yaml`, `Transform: AWS::Serverless-2016-10-31`), que se traduce a CloudFormation (D-15).
 - **DynamoDB en capacidad provisionada 25/25 sin auto scaling** (D-26): el exceso de carga produce `ThrottlingException`, **no** factura. Si algún día se migra a `PAY_PER_REQUEST`, hace falta decisión nueva + OK del usuario (D-29).
+- **Runtime `nodejs26.x` sobre `arm64` (Graviton) — D-61**, supersede el valor de D-40 (`nodejs22.x` + `x86_64`). `nodejs26.x` está en **public preview** en Lambda: AWS dice que los runtimes en preview *«not covered by the Lambda SLA or Technical Support, and should not be used for production workloads»* — el usuario asume ese riesgo de forma explícita. Rollback si algo se rompe: `Runtime: nodejs24.x` + push — update **sin interrupción**, sin reemplazo y sin *prune*. `MemorySize: 256` y `Timeout: 30` no cambian. El motor Node local es **v26.13.1** (medido) ⇒ la paridad dev/prod **sigue intacta** (no hay «deriva aceptada»).
 
 ## Estructura de carpetas y reglas de dependencia (D-16)
 
 ```
 src/
-  lambda.js         # UNICA entrada Lambda: serverlessHttp(app) (D-28; antes anunciado como vendia/serverless-express). Nada de lógica aquí.
+  lambda.js         # UNICA entrada Lambda: serverlessHttp(app) (D-28; versión viva: serverless-http@4.0.0, D-62). Nada de lógica aquí.
   local.js          # app.listen(PORT) para `pnpm run dev`: mismo árbol, sin adaptador.
   app.js            # createApp(deps): middlewares globales, montaje de routers, error handler final.
   routes/
@@ -56,7 +57,7 @@ src/
     ticketRepository.js # único sitio que conoce DynamoDB y la tabla
   utils/            # http.js (responses), validation.js, ids.js (UUID v5 determinista con node:crypto, D-19), time.js, logger.js
   config.js         # única lectura de process.env
-tests/              # unitarios de services + supertest sobre createApp() + test de contrato OpenAPI
+tests/              # unitarios de services + supertest sobre createApp() + tests a nivel de ADAPTADOR (lambda.adapter.test.js) + test de contrato OpenAPI
 template.yaml       # SAM: 1 tabla PROVISIONED + 1 Function + FunctionUrlConfig + 1 rol
 docs/human/         # esta documentación (I8)
 ```
@@ -66,6 +67,12 @@ Dirección única de dependencias: `lambda|local → app → routes → middlewa
 - Nada importa la SDK de AWS fuera de `repositories/`; `telegramService.js` habla con la Bot API con `fetch` nativo (regla exacta: spec §5 + A-08).
 - `createApp()` recibe dependencias inyectadas → los tests levantan la app real sin Lambda, sin DynamoDB y sin Telegram.
 - **CORS: cero líneas en código.** Se declara solo en `FunctionUrlConfig.Cors` del IaC; si Express emitiera también cabeceras CORS, Lambda las duplica y el preflight se rompe (I4).
+
+### Adaptador Express↔Lambda: `serverless-http@4.0.0` exacta (D-28 → D-62)
+
+La versión fijada en D-28 (`3.2.0`) resultó incompatible con `body-parser@2` (el que trae Express 5): construía la petición con un socket falso no legible que el parser interpretaba como «cuerpo ya parseado», y **`express.json()` no parseaba ningún cuerpo bajo Lambda** — `req.body` quedaba en un Buffer crudo y el `400 VALIDATION_ERROR` del contrato era inalcanzable. `4.0.0` usa un stream real y resuelve el defecto; la versión se mantiene **exacta** (`--save-exact`): bajar a 3.2.0 lo reintroduce **en silencio**. Consecuencia de contrato: los errores del parser de cuerpo (JSON inválido, cuerpo que supera el límite de **64 KB**, charset o content-encoding no soportados) responden siempre `400 VALIDATION_ERROR`, nunca un 5xx.
+
+**Por qué `supertest` no lo detectó:** `supertest` ejercita `createApp()` directamente, sin pasar por el adaptador — el defecto solo existe dentro de Lambda. Por eso la capa de tests incluye ahora **tests a nivel de adaptador** (`tests/lambda.adapter.test.js`), que invocan el handler con **eventos Function URL v2.0 sintéticos** y cubren ese punto ciego.
 
 ## Contrato de configuración
 
@@ -104,7 +111,7 @@ Siete variables, todas a través de `src/config.js` (nunca `process.env` suelto 
 ## Decisiones pendientes (revisado al cerrar Fase 01 · 2026-11-19)
 
 - **Fase 01:** D-19/D-20/D-21/D-22 **resueltas el 2026-11-19** (visto del usuario; registro en `DECISIONS.md`): esquema estricto de 9 atributos, `id` UUID v5 determinista + `Put` condicional (dedup exacta sin GSI), contrato de 4 endpoints con envelope único (7 códigos), seguridad de superficie (`timingSafeEqual`; secreto del webhook → 403) y guards manuales sin librerías. Detalle: `docs/human/technical/data-model.md` + `docs/api/openapi.yaml`.
-- **Fase 02 (cerrándose hoy):** ✅ fijada la versión exacta de pnpm (`10.18.1`) y el adaptador definitivo (**D-28**: `serverless-http@3.2.0`, la premisa vendia-v5 de la Fase 00 era falsa); ✅ framework de tests (**D-23**: `node:test` + `supertest` + inyección); ✅ instalado `@redocly/cli@2.81.0` para `validate:api` (**D-33**). Pendientes que sobreviven a la fase: constante `TG_UPDATE_NS` en `src/utils/ids.js` (nace con la ingesta, **Fase 04** — en Fase 02 no hay consumidor); `@mermaid-js/mermaid-cli` + diagramas (**Fase 03**); deuda del harness: huecos de mecanización de `check.ps1` (ver fila 00 en `INDEX.md`).
+- **Fase 02 (cerrándose hoy):** ✅ fijada la versión exacta de pnpm (`10.18.1`) y el adaptador definitivo (**D-28**: `serverless-http@3.2.0` —sustituida por **`4.0.0`** en Fase 04, **D-62**: incompatibilidad con `body-parser@2`—, la premisa vendia-v5 de la Fase 00 era falsa); ✅ framework de tests (**D-23**: `node:test` + `supertest` + inyección); ✅ instalado `@redocly/cli@2.81.0` para `validate:api` (**D-33**). Pendientes que sobreviven a la fase: constante `TG_UPDATE_NS` en `src/utils/ids.js` (nace con la ingesta, **Fase 04** — en Fase 02 no hay consumidor); `@mermaid-js/mermaid-cli` + diagramas (**Fase 03**); deuda del harness: huecos de mecanización de `check.ps1` (ver fila 00 en `INDEX.md`).
 - **Fase 03:** rol IAM exacto de menor privilegio (**D-24**, el gate cfn-lint ya lo fijó D-31); spike de empaquetado con pnpm árbol plano (**D-31**).
 - **Fase 04 (pipeline, D-42):** estrategia de CI/CD y secretos (**D-25**, se resuelve ahí). El `setWebhook` y su momento viven en la **Fase 09**.
 - **Futura:** migración a `PAY_PER_REQUEST` (**D-29**, exige OK explícito del usuario).

@@ -5,7 +5,7 @@
 # la instalación de la devDep con versión exacta ocurre en Fase 02 — antes de eso, este archivo se valida a mano).
 # Diagramas: los .mmd/.svg del flujo por endpoint (api-flow) se crean en Fase 04, cuando exista la
 # implementación que representan (I8: nada vacío ni por adelantado); la exportación local es `pnpm run docs:diagrams` (@mermaid-js/mermaid-cli, D-33).
-# Actualizado: fase 03 · 2026-11-20
+# Actualizado: fase 04 · 2026-11-22
 openapi: 3.1.0
 info:
   title: SubDesk API
@@ -267,7 +267,7 @@ components:
 
   responses:
     ValidationError:
-      description: Entrada invalida (campo fuera de schema/enum, forma no permitida).
+      description: Entrada invalida (campo fuera de schema/enum, forma no permitida). Tambien la cubre cualquier rechazo del parser de cuerpo (D-62) - JSON mal formado, cuerpo que supera el limite de 64 KB, charset no soportado, content-encoding desconocido, o descompresion fallida del Content-Encoding declarado. En los cinco casos el codigo es VALIDATION_ERROR y nunca un 5xx, porque los cinco los puede provocar cualquier cliente. En el webhook NO aplica - alli el contrato exige absorberlo como 200 (ver /webhook/telegram).
       content:
         application/json:
           schema:

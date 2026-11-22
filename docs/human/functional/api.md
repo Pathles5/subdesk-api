@@ -175,13 +175,27 @@ Todo error de toda la API usa el mismo cuerpo (decisión D-20):
 
 | `error.code` | HTTP | Dónde aparece | Qué significa para ti |
 |---|---|---|---|
-| `VALIDATION_ERROR` | `400` | `GET` · `PATCH` · `reply` | enviaste algo fuera del contrato: campo, forma o valor de enum inválido |
+| `VALIDATION_ERROR` | `400` | `GET` · `PATCH` · `reply` | enviaste algo fuera del contrato: campo, forma o valor de enum inválido — **o un cuerpo que el parser rechaza** (los cinco casos, tabla de abajo) |
 | `UNAUTHORIZED` | `401` | `/api/*` | falta la cabecera `x-api-key` o está vacía |
 | `FORBIDDEN` | `403` | `/api/*` y webhook | la clave no coincide con `ADMIN_API_KEY`, o el secreto del webhook falta o es incorrecto |
 | `NOT_FOUND` | `404` | `PATCH` · `reply` | no hay ticket con ese `id` |
 | `ALREADY_RESOLVED` | `409` | `reply` | el ticket ya está `RESOLVED`; reply no reabre |
 | `TELEGRAM_SEND_FAILED` | `502` | `reply` | Telegram no aceptó el mensaje; el ticket quedó intacto |
 | `INTERNAL` | `500` | cualquier `/api/*` | fallo inesperado del servidor. En el webhook **nunca** se emite: su guard lo convierte en `200 {"ignored":"internal_error"}` |
+
+Los cinco rechazos del parser de cuerpo en **`/api/*`** son también `400 VALIDATION_ERROR` — nunca un 5xx — desde **D-62**. Estos son los cinco casos y su `message` literal (texto exacto que produce el código, `src/app.js`; programa contra `code`, no contra estos textos):
+
+| Situación | `error.message` |
+|---|---|
+| JSON mal formado | `invalid JSON body` |
+| Cuerpo que supera el límite de **64 KB** | `request body too large` |
+| Charset no `utf-*` (p. ej. `charset=iso-8859-1`) | `unsupported charset` |
+| `Content-Encoding` desconocido (p. ej. `bogus`) | `unsupported content encoding` |
+| Descompresión fallida del `Content-Encoding` declarado (gzip/br/deflate/zstd con datos inválidos) | `invalid request body` |
+
+El quinto caso es el que más cuesta entender: llega con `err.type === null` y `status 400`, así que lo cubre un respaldo **acotado a `status === 400`** — no a «cualquier 4xx»: un `404`/`409` que cayera ahí se convertiría en un `VALIDATION_ERROR` falso. Antes de este cambio, los cinco producían un **`500 INTERNAL`** provocable por cualquier cliente.
+
+**Esto aplica solo a `/api/*`.** En **`/webhook/telegram` NO aplica**: el contrato exige que allí cualquier cuerpo no parseable o excesivo se absorba como **`200 {"ignored": …}`** (nunca 4xx/5xx), para que Telegram no reintente en bucle (I5).
 
 El `500` no está declarado en ningún endpoint del contrato: es el fallback del envelope para lo inesperado. Si tu panel lo ve en `/api/*`, es un incidente nuestro, no un error de uso.
 
@@ -190,7 +204,7 @@ El `500` no está declarado en ningún endpoint del contrato: es el fallback del
 | Límite | Valor | Consecuencia práctica |
 |---|---|---|
 | Tiempo de respuesta de una petición | 30 s | cada llamada es síncrona y corta; no hay procesos largos por HTTP |
-| Payload de una petición | 6 MB | irrelevante con mensajes de Telegram; el webhook declara su propio límite más ajustado: 64 KB |
+| Payload de una petición | 6 MB (plataforma) · **64 KB (límite de la app)** | el límite de **64 KB** aplica a **todos** los cuerpos JSON — el webhook **y también `/api/*`** (D-62). Superarlo en `/api/*` responde `400 VALIDATION_ERROR` con `request body too large`; en el webhook se absorbe como `200 {"ignored": …}` |
 | `limit` de paginación | 1–100 (defecto 50) | no pidas páginas de 1.000 |
 | `message_content` / `response_text` | 1–4096 caracteres | el tamaño máximo de un mensaje de Telegram de texto |
 | Contenido del ticket en pantallas y logs | — | es **datos de usuario**: el servicio jamás lo loguea (política de logs D-18); cuídalo tú igual en el panel |

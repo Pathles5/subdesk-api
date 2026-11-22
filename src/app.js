@@ -14,6 +14,21 @@ import { sendError } from "./utils/http.js";
 // IaC; emitting them in Express duplicates Access-Control-Allow-Origin and breaks
 // preflight. The `cors` package must never enter this project.
 
+// body-parser error vocabulary, keyed by the err.type it sets on the rejections that
+// carry one: malformed JSON, oversized body (> the 64 KB limit), unsupported charset and
+// unsupported content-encoding (failed decompressions arrive with err.type === null and
+// are covered by the status === 400 fallback inside the handler). ALL of them are client
+// errors and the frozen contract documents exactly one status for a bad request body —
+// 400 VALIDATION_ERROR (413 & co. do NOT exist in openapi.yaml). Letting any of them fall
+// through to globalErrorHandler would answer a client-triggerable 500 INTERNAL: noise and
+// a log-spam vector (I4).
+const BODY_PARSER_ERROR_MESSAGES = Object.freeze({
+  "entity.parse.failed": "invalid JSON body",
+  "entity.too.large": "request body too large",
+  "charset.unsupported": "unsupported charset",
+  "encoding.unsupported": "unsupported content encoding",
+});
+
 /**
  * @param {{ config: object, logger?: object }} deps — config arrives by DI (D-17);
  *        the logger defaults to config.logLevel. Never calls app.listen(): the two
@@ -41,11 +56,24 @@ export function createApp({ config, logger = createLogger(config.logLevel) }) {
   // router, before any handler and therefore before any DynamoDB access (I4).
   app.use("/api/tickets", createTicketsRouter({ config }));
 
-  // --- JSON parse failures on the remaining routes -> 400 VALIDATION_ERROR envelope
-  // (body-parser reports them as err.type === "entity.parse.failed").
-  app.use(function jsonParseErrorHandler(err, req, res, next) {
-    if (err && err.type === "entity.parse.failed") {
-      sendError(res, 400, "VALIDATION_ERROR", "invalid JSON body");
+  // --- Bad request bodies on the remaining routes -> 400 VALIDATION_ERROR envelope.
+  // body-parser reports most rejections via err.type (malformed JSON, oversized body,
+  // unsupported charset, unsupported content-encoding), each mapped to its own message by
+  // BODY_PARSER_ERROR_MESSAGES; failed decompressions arrive with err.type === null and
+  // are caught by the status === 400 fallback. Either way, no client error may surface
+  // as a 500 INTERNAL from globalErrorHandler.
+  app.use(function bodyParserErrorHandler(err, req, res, next) {
+    const message = err && BODY_PARSER_ERROR_MESSAGES[err.type];
+    if (typeof message === "string") {
+      sendError(res, 400, "VALIDATION_ERROR", message);
+      return;
+    }
+    // Decompression failures (malformed gzip/br/deflate/zstd data) leave body-parser with
+    // err.type === null but status/expose set by http-errors, so the table above cannot
+    // catch them. Scoped to 400 ONLY: 401/403/404/409 belong to other contract codes and
+    // are answered by sendError inside their own middleware, never by falling through here.
+    if (err && err.status === 400) {
+      sendError(res, 400, "VALIDATION_ERROR", "invalid request body");
       return;
     }
     next(err);

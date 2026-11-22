@@ -582,6 +582,42 @@ if ($cfnFiles.Count -gt 0) {
             }
         }
     }
+    # --- Adapter parity (D-62): the Lambda adapter must be compatible with body-parser@2 ----
+    # serverless-http 3.x built the IncomingMessage on a socket stub ({ readable: false }) plus
+    # complete: true, so on-finished reported the request as already finished and body-parser@2
+    # (bundled with express@5) skipped parsing: under Lambda EVERY req.body stayed the raw Buffer
+    # the adapter assigns, no 400 VALIDATION_ERROR was reachable, and the whole supertest suite
+    # stayed green. Two guards, precisely because the failure is silent:
+    #   * the pinned adapter must be >= 4.x (4.0.0 uses a real PassThrough socket);
+    #   * an adapter-level test file must exist and really import the adapter - a suite that only
+    #     drives createApp through supertest cannot see this class of defect at all (the blind
+    #     spot of D-23 that let 37/37 pass on a broken production path).
+    $pkgForAdapter = Join-Path $RepoRoot "package.json"
+    if (Test-Path $pkgForAdapter) {
+        try {
+            $adapterSpec = (Get-Content $pkgForAdapter -Raw -Encoding UTF8 | ConvertFrom-Json).dependencies.'serverless-http'
+            if ($adapterSpec) {
+                $adapterMajor = [regex]::Match($adapterSpec, '(\d+)')
+                if (-not $adapterMajor.Success -or [int]$adapterMajor.Groups[1].Value -lt 4) {
+                    Add-Fail ("Adapter parity: serverless-http '{0}' is not >= 4.x - 3.x makes body-parser@2 believe the body was already parsed, so every req.body stays a raw Buffer under Lambda and the contractual 400 VALIDATION_ERROR is unreachable (D-62)." -f $adapterSpec)
+                } else {
+                    Add-Note ("Adapter parity: serverless-http '{0}' (>= 4.x, body-parser@2 compatible)." -f $adapterSpec)
+                }
+            } else {
+                Add-Note "Adapter parity: serverless-http is not a dependency, version assert skipped."
+            }
+        } catch {
+            Add-Note "Adapter parity: package.json unreadable, version assert skipped."
+        }
+    }
+    $adapterTest = Join-Path $RepoRoot "tests/lambda.adapter.test.js"
+    if (-not (Test-Path $adapterTest)) {
+        Add-Fail "Adapter parity: tests/lambda.adapter.test.js is missing - supertest drives createApp WITHOUT the adapter, so no amount of green tests can detect a broken Express<->Lambda body path (D-62, blind spot of D-23)."
+    } elseif ((Get-Content $adapterTest -Raw -Encoding UTF8) -notmatch 'serverless-http') {
+        Add-Fail "Adapter parity: tests/lambda.adapter.test.js no longer imports the adapter - an emptied or rewritten file would silently remove the only layer that exercises the Express<->Lambda body path (D-62)."
+    } else {
+        Add-Note "Adapter parity: adapter-level test layer present and importing serverless-http."
+    }
     # Single-region rule (I7) - REWRITTEN 2026-11-22 for D-54: the expected region is NO LONGER a
     # literal inside this script. It is read from infra/deployment.env, the single source of truth of
     # the deployment target, and every other region literal in the repo's executable artefacts (IaC,
