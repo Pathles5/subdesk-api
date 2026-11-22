@@ -22,6 +22,39 @@ $notes = @()
 function Add-Fail([string]$msg) { $script:failures += $msg }
 function Add-Note([string]$msg) { $script:notes += $msg }
 
+# Splits a GitHub Actions workflow into its job blocks (jobs live at 2-space indent under `jobs:`)
+# WITHOUT a YAML dependency - check.ps1 must stay dependency-free (AGENTS §6). Full-line comments are
+# dropped so a comment can neither satisfy nor trigger a security assert.
+# Returns objects with .Id and .Body (the job's own lines, comment-free).
+function Get-JobBlocks([string]$text) {
+    $result = New-Object System.Collections.Generic.List[object]
+    $lines = $text -split "`r?`n"
+    $inJobs = $false
+    $curId = $null
+    $curBody = New-Object System.Collections.Generic.List[string]
+    foreach ($ln in $lines) {
+        if ($ln -match '^jobs:\s*$') { $inJobs = $true; continue }
+        # A zero-indent key ends the jobs mapping.
+        if ($inJobs -and $ln -match '^[A-Za-z0-9_-]+:') {
+            if ($null -ne $curId) { $result.Add([pscustomobject]@{ Id = $curId; Body = ($curBody -join "`n") }) }
+            $inJobs = $false; $curId = $null
+        }
+        if (-not $inJobs) { continue }
+        # 2-space key = a new job.
+        if ($ln -match '^  [A-Za-z0-9_."-]+:\s*$') {
+            if ($null -ne $curId) { $result.Add([pscustomobject]@{ Id = $curId; Body = ($curBody -join "`n") }) }
+            $curId = ($ln.Trim() -replace ':$', '')
+            $curBody = New-Object System.Collections.Generic.List[string]
+            continue
+        }
+        if ($null -eq $curId) { continue }
+        if ($ln -match '^\s*#') { continue }   # comment line: cannot prove anything
+        $curBody.Add($ln)
+    }
+    if ($null -ne $curId) { $result.Add([pscustomobject]@{ Id = $curId; Body = ($curBody -join "`n") }) }
+    return $result
+}
+
 # --- Required harness documents ---
 $constitutionPath = Join-Path $RepoRoot "docs/specs/constitution.md"
 $decisionsPath    = Join-Path $RepoRoot "DECISIONS.md"
@@ -260,10 +293,19 @@ if (Test-Path $workflowDir) {
                 Add-Fail ("{0}: OIDC credential step without 'id-token: write' permission - the job cannot mint a token (D-43)." -f $w.Name)
             }
         }
-        # D-42: anything that can change AWS state MUST run behind a GitHub environment (the human-approval gate, I6).
-        if ($wRaw -match "(?i)(sam\s+deploy|sam\s+package|create-change-set|execute-change-set|delete-stack|sam\s+delete)") {
-            if ($wRaw -notmatch "(?im)^\s*environment:") {
-                Add-Fail ("{0}: workflow mutates AWS state without 'environment:' - the approval gate (I6/D-42) would be bypassed." -f $w.Name)
+        # D-42/D-43/D-48: every job that can change AWS state MUST run inside a GitHub environment.
+        # Since D-48 that environment is NOT a human-approval gate (the user decided NO required
+        # reviewers): a job-level `environment:` is what (a) scopes the app secrets (spec 04 §5.4) and
+        # (b) mints the OIDC `sub` claim `repo:<repo>:environment:<name>` that the trust of
+        # SubDeskCiDeployRole demands via StringEquals - without it there are simply no AWS
+        # credentials, so the invariant is still fail-closed. Checked PER JOB: a file-level match
+        # elsewhere would prove nothing (the pre-D-48 assert only grepped the whole file).
+        $awsMutate = "(?i)(sam\s+deploy|sam\s+package|sam\s+delete|create-change-set|execute-change-set|delete-stack|cloudformation\s+deploy)"
+        foreach ($jb in (Get-JobBlocks $wRaw)) {
+            if ($jb.Body -match $awsMutate) {
+                if ($jb.Body -notmatch "(?m)^    environment:") {
+                    Add-Fail ("{0}: job '{1}' mutates AWS state without a job-level 'environment:' - the OIDC claim binding and secret scope (spec 04 §5.1/§5.4, D-42/D-43/D-48) would be lost." -f $w.Name, $jb.Id)
+                }
             }
         }
         # D-31: sam build stays out of every pipeline (executes package-manager scripts).

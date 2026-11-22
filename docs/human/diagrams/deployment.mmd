@@ -1,17 +1,25 @@
 %% deployment.mmd — despliegue SubDesk API: del repo a los recursos reales del template.yaml
-%% Actualizado: fase 03 · 2026-11-20
+%% Actualizado: fase 04 · 2026-11-22
 %% Fuente versionada; el .svg se regenera con `pnpm run docs:diagrams` (D-33/D-41, local, sin CDN).
 %% Coherente con template.yaml A-01 (Fase 03): 7 recursos, region us-east-1 fijada en el deploy.
+%% Modelo de visto D-48 / spec 04 A-03: NO hay aprobacion manual en Actions (environment dev
+%% sin required reviewers) — el visto es la accion que arranca el workflow. El candado es la
+%% politica de ramas (solo main, can_admins_bypass false) + el claim OIDC del trust (D-43).
 flowchart LR
     subgraph dev["Desarrollo (local)"]
         REPO["repo git<br/>src/ + template.yaml"]
         GATES["compuertas<br/>pnpm lint/test<br/>validate:api/validate:iac<br/>check.ps1"]
     end
 
+    VISTO["visto I6 = la accion de disparo (D-48)<br/>push a main AUTORIZADO → deploy<br/>workflow_dispatch + literal BORRO-SUBDESK-API-DEV → prune<br/>no hay Waiting ni reviewers"]
+
     subgraph ci["GitHub Actions — pipeline (Fase 04; D-42: unico ejecutor de AWS)"]
-        Wf["deploy.yml<br/>pnpm install --frozen-lockfile --prod<br/>zip artefacto (nodeLinker hoisted, D-31)"]
-        SECRETS["GitHub Secrets<br/>TELEGRAM_BOT_TOKEN · ADMIN_API_KEY<br/>TELEGRAM_WEBHOOK_SECRET"]
+        Wf["deploy.yml<br/>verify → package<br/>compuertas + ZIP determinista<br/>nodeLinker hoisted (D-31)"]
+        ENVID["environment: dev<br/>scope de secretos + claim OIDC<br/>sub = repo:Pathles5/subdesk-api:environment:dev"]
+        SECRETS["Secretos del environment<br/>TELEGRAM_BOT_TOKEN · ADMIN_API_KEY<br/>TELEGRAM_WEBHOOK_SECRET"]
     end
+
+    OIDC["STS via OIDC<br/>SubDeskCiDeployRole · role-to-assume<br/>cero claves de largo vivir (D-43)<br/>policy auditada (A-03.3 / D-49)"]
 
     subgraph cfn["CloudFormation stack (us-east-1) — SAM transform D-15"]
         TABLE[("TicketsTable<br/>PROVISIONED 25/25 · Standard<br/>PK id(S) · sin indices · SSE<br/>I2/D-26")]
@@ -25,9 +33,11 @@ flowchart LR
     TG["Telegram<br/>(webhooks entrantes;<br/>el bot-hijo llegara D-38)"]
     PANEL["Panel frontend<br/>(externo, x-api-key)"]
 
-    REPO --> GATES --> Wf
+    REPO --> GATES --> VISTO --> Wf
+    Wf --- ENVID
     SECRETS -. "--parameter-overrides (NoEcho)" .-> Wf
-    Wf -- "sam deploy (F08, con visto I6)" --> cfn
+    ENVID -- "claim que exige el trust" --> OIDC
+    OIDC -- "sam package + sam deploy (sin aprobacion previa)" --> cfn
     FN --> TABLE
     ROLE -. "asume" .-> FN
     FN -. "ARN destino" .-> URL

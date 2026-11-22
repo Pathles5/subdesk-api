@@ -1,6 +1,6 @@
 # SubDesk API
 
-Actualizado: fase 03 · 2026-11-20
+Actualizado: fase 04 · 2026-11-22
 
 > **Qué es:** una **API backend** de gestión de tickets, serverless en AWS, con coste previsto $0 (invariante I2). Recibe mensajes vía webhook, los guarda como tickets en DynamoDB y expone una REST API para un panel de atención.
 >
@@ -29,7 +29,7 @@ Actualizado: fase 03 · 2026-11-20
 | 01 | Modelo de datos (`TicketsTable`) y contratos de los 4 endpoints congelados (OpenAPI 3.1) | ✅ `approved` |
 | 02 | Scaffold del proyecto (ESM, lint, scripts, tests, `.env.example`) — **los comandos `pnpm` y el código `src/` ya existen** | ✅ entregado (cierre: compuertas + revisión fresh-eyes) |
 | 03 | Infraestructura como código (`template.yaml`: tabla + Lambda + URL + IAM), validada sin desplegar | ✅ (cerrada 2026-11-20; el deploy nunca es local — es la pipeline, Fase 04, D-42) |
-| 04 | **Pipeline de despliegue** (`deploy.yml`/`prune.yml`, OIDC, primer apilado stub, evidencias de coste) — **solo la pipeline toca AWS** (D-42) | ⏳ siguiente |
+| 04 | **Pipeline de despliegue** (`deploy.yml`/`prune.yml`, OIDC, primer apilado stub, evidencias de coste) — **solo la pipeline toca AWS** (D-42); el visto es el push autorizado, no una aprobación en Actions (D-48) | 🟡 en vuelo: workflows verdes en `verify`/`package` (run #2), identidad y policy verificadas (D-49); el primer apilado (run #3) espera **solo el push a `main`** |
 | 05 | Ingesta `POST /webhook/telegram` | ⏳ |
 | 06 | Lectura `GET /api/tickets` + auth | ⏳ |
 | 07 | Mutación `PATCH /api/tickets/{id}` | ⏳ |
@@ -54,7 +54,8 @@ docs/
     technical/data-model.md    la tabla, el id determinista, costes por operación
 scripts/check.ps1              compuerta mecánica (docs, higiene de secretos, asserts IaC)
 src/ tests/                scaffold vivo desde Fase 02 (capas + seguridad + tests; stubs 501)
-template.yaml              IaC SAM (Fase 03): validada estaticamente, NO desplegada (deploy = Fase 08 con tu visto)
+template.yaml              IaC SAM (Fase 03): validada en seco; el deploy lo ejecuta SOLO la
+                           pipeline de Fase 04 (D-42) — nunca un comando local
 ```
 
 ## Comandos
@@ -75,7 +76,9 @@ Desde la Fase 03 se añade `pnpm run validate:iac` (`cfn-lint template.yaml`, of
 
 Qué prueba cada compuerta, el smoke manual con `curl` y la política de logs: `docs/human/technical/operations.md`.
 
-No hay comando `deploy`: ningún despliegue ocurre sin propuesta explícita y **visto del usuario** (I6).
+### Despliegue (Fase 04): cómo se autoriza
+
+No hay comando `deploy` en este repo y **ningún comando de AWS se teclea en local**: la pipeline es la única que toca AWS (D-42). El visto no es una aprobación dentro de GitHub Actions — el environment `dev` **no tiene *required reviewers***, así que no existe el estado *Waiting* (**D-48**, 2026-11-22): **el visto es la acción que arranca el workflow**, es decir el **push a `main`** que el orquestador solo ejecuta con tu autorización explícita. Consecuencia asumida: **todo push a `main` despliega**, incluidos los commits de solo documentación. El `prune` (`prune.yml`) sí tiene dos capas visibles en el run: el `workflow_dispatch` manual y el literal exacto `BORRO-SUBDESK-API-DEV`. Comandos, jobs, secretos y verificación del environment por API: `docs/human/runbook.md` §2 y §4.1.
 
 ## Variables de entorno (contrato cerrado, D-17)
 
@@ -93,7 +96,7 @@ Siete nombres, leídos solo por `src/config.js`. **Ningún valor real va al repo
 
 ## Cómo se conecta el bot (cuando exista)
 
-El registro real del webhook llega con el despliegue (Fase 08) y su comando exacto, con valores reales de tu entorno, vivirá en `docs/human/runbook.md`. La forma es:
+El registro real del webhook llega con la **Fase 09** (con bot existente) y su comando exacto, con valores reales de tu entorno, vivirá en `docs/human/runbook.md`. La forma es:
 
 ```bash
 curl -s "https://api.telegram.org/bot<TU_BOT_TOKEN>/setWebhook" \
@@ -114,6 +117,7 @@ Nada más: ni SDKs ni librerías de bot en este repo. Los reintentos, los format
 | la tabla y por qué el `id` deduplica sin índices | `docs/human/technical/data-model.md` |
 | cómo encajará el bot (proyecto-hijo: botones, suscripciones, catálogo) | `docs/human/technical/bot-plan.md` (D-38) |
 | la topología y las reglas de capas | `docs/human/technical/architecture.md` |
+| desplegar por pipeline, hacer *prune*, rotar claves y revisar el coste | `docs/human/runbook.md` (§2 despliegue · §4.1 prune · §5 premisas I2) |
 | las reglas inquebrantables (coste $0, secretos, CORS, ack) | `docs/specs/constitution.md` |
 | en qué está el proyecto y qué queda | `docs/specs/INDEX.md` |
 | por qué se decidió cada cosa | `DECISIONS.md` (append-only, IDs `D-xx`) |
@@ -126,4 +130,4 @@ Nada más: ni SDKs ni librerías de bot en este repo. Los reintentos, los format
 
 ## Aviso de proceso
 
-Este repo se construye con un ciclo Spec-Driven (spec → tasks → tu visto por tarea → implementación → compuertas → revisión fresh-eyes → decisión registrada). Si llegas buscando el código: el **scaffold ya existe** (Fase 02: capas, middleware de seguridad completo, tests y contrato superficie en verde); los endpoints se llenan en las Fases 04–07 y la infraestructura en la 03. Todo verificado por `pnpm test`, `pnpm run lint`, `pnpm run validate:api` y `scripts/check.ps1`.
+Este repo se construye con un ciclo Spec-Driven (spec → tasks → tu visto por tarea → implementación → compuertas → revisión fresh-eyes → decisión registrada). Si llegas buscando el código: el **scaffold ya existe** (Fase 02: capas, middleware de seguridad completo, tests y contrato superficie en verde); la **infraestructura** se escribió en la Fase 03 (validada en seco), la **pipeline** es la Fase 04 (en vuelo) y los endpoints se llenan en las **Fases 05–08** (numeración post-D-42: ingesta 05, lectura 06, mutación 07, `reply` 08; `setWebhook` + E2E en la 09). Todo verificado por `pnpm test`, `pnpm run lint`, `pnpm run validate:api` y `scripts/check.ps1`.

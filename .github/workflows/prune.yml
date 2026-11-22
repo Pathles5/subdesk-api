@@ -2,10 +2,17 @@
 #
 # workflow_dispatch ONLY — never push, never schedule. DOUBLE confirmation, both
 # mechanical and auditable (D-42):
-#   (1) the `confirm` input must equal the literal BORRO-SUBDESK-API-DEV exactly;
-#   (2) the `destroy` job runs in environment `dev`, so it additionally requires
-#       the human required-reviewer approval — the I6 visto for a destructive
-#       action (same mechanism that gates deploy.yml, D-43).
+#   (1) dispatch-only: the run cannot start by itself and cannot start from a push or
+#       a schedule — a human with write access has to launch it by hand, and that
+#       action IS the I6 visto for a destructive operation;
+#   (2) the `confirm` input must equal the literal BORRO-SUBDESK-API-DEV exactly,
+#       typed by that human (verify-approval fails closed on anything else,
+#       case-sensitive).
+# Note on the `destroy` job's `environment: dev`: it contributes the secrets and the
+# OIDC `sub` claim (`repo:Pathles5/subdesk-api:environment:dev`) that SubDeskCiDeployRole's
+# trust condition demands, so a job without the pin simply gets no credentials (D-43,
+# fail-closed). It is NOT a human reviewer: by the user's explicit decision (D-48) the
+# environment carries no required reviewers and nothing waits for an approval click.
 #
 # Identity: OIDC ONLY (D-43) — no static AWS keys referenced (spec §5.3; the
 # check.ps1 assert over .github/** must stay green).
@@ -62,14 +69,17 @@ jobs:
             echo "Aborting: 'confirm' must be exactly BORRO-SUBDESK-API-DEV." >&2
             exit 1
           fi
-          echo "Confirmation literal matched. The destroy job still needs the"
-          echo "'dev' environment approval from the required reviewer (I6 visto)."
+          echo "Confirmation literal matched - dispatch plus the exact literal are"
+          echo "the two confirmations. There is no environment reviewer (D-48)."
 
   destroy:
     name: destroy — delete-stack subdesk-api-dev and wait for DELETE_COMPLETE
     needs: verify-approval
     runs-on: ubuntu-latest
-    # environment: dev — the second, independent confirmation (required reviewer).
+    # environment: dev — secret scope + the OIDC `sub` claim binding that lets this job
+    # assume SubDeskCiDeployRole at all (D-43, fail-closed: without the pin there are no
+    # AWS credentials). NOT the second confirmation: by D-48 this environment has no
+    # required reviewers, so the two real confirmations stay dispatch + exact literal.
     environment: dev
     timeout-minutes: 30
     steps:

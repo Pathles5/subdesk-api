@@ -44,16 +44,31 @@ La condición **atará el rol al environment `dev`**: ni otro repo, ni otro ento
 
 ### C) Policy inline `SubDeskCiDeployPolicy` (paso 2 — pegar tal cual, cuenta ya sustituida)
 
+> **A-03/D-48 (2026-11-22) — versión auditada actual.** CloudFormation autoriza cada llamada por
+> recurso **contra la sesión del propio rol de CI** (no se pasa `--role-arn` a `sam deploy`, así que
+> CFN usa un *temporary session* generado de nuestras credenciales: docs AWS
+> `using-iam-servicerole.html`). Con la versión anterior el run #3 habría muerto en `ApiLogGroup`
+> **y también en su rollback** (sin `logs:DeleteLogGroup`), dejando un stack `ROLLBACK_FAILED` que la
+> pipeline no puede limpiar. Añadidas: `logs:CreateLogGroup`, `logs:PutRetentionPolicy` (la retención
+> NO es parámetro de `CreateLogGroup`), `logs:TagResource`, `logs:DeleteLogGroup`,
+> `lambda:TagResource` (la fila de autorización de `CreateFunction` la exige aunque los tags viajen
+> dentro), `lambda:ListTags` (`GetFunction` se autoriza con `GetFunction` **y** `ListTags`) y
+> `s3:PutBucketTagging`. Quitada: `cloudformation:ListStacks` — es acción *list* sin resource-level,
+> dentro de un Sid con ARN de stack era **inerte** y nadie la llama (`deployer.py` siempre pasa
+> `StackName`). Cada añadidos está verificado contra el grafo de llamadas de SAM CLI `v1.174.0` y el
+> *Service Authorization Reference* de AWS; la justificación de lo que **no** se concede está en
+> comments del propio `bootstrap-oidc-cli.sh`.
+
 ```json
 {
   "Version": "2012-10-17",
   "Statement": [
-    { "Sid": "CloudFormation", "Effect": "Allow", "Action": ["cloudformation:CreateChangeSet","cloudformation:DescribeChangeSet","cloudformation:ExecuteChangeSet","cloudformation:DescribeStacks","cloudformation:DescribeStackEvents","cloudformation:GetTemplateSummary","cloudformation:DeleteStack","cloudformation:ListStacks"], "Resource": "arn:aws:cloudformation:us-east-1:159177056493:stack/subdesk-api-dev/*" },
-    { "Sid": "SAMArtifactBucket", "Effect": "Allow", "Action": ["s3:CreateBucket","s3:PutObject","s3:GetObject","s3:ListBucket","s3:PutEncryptionConfiguration","s3:PutLifecycleConfiguration"], "Resource": ["arn:aws:s3:::aws-sam-cli-managed-*", "arn:aws:s3:::aws-sam-cli-managed-*/*"] },
-    { "Sid": "LambdaScoped", "Effect": "Allow", "Action": ["lambda:CreateFunction","lambda:GetFunction","lambda:UpdateFunctionCode","lambda:UpdateFunctionConfiguration","lambda:DeleteFunction","lambda:GetFunctionConfiguration","lambda:ListVersionsByFunction"], "Resource": "arn:aws:lambda:us-east-1:159177056493:function:TicketApiFunction" },
+    { "Sid": "CloudFormation", "Effect": "Allow", "Action": ["cloudformation:CreateChangeSet","cloudformation:DescribeChangeSet","cloudformation:ExecuteChangeSet","cloudformation:DescribeStacks","cloudformation:DescribeStackEvents","cloudformation:GetTemplateSummary","cloudformation:DeleteStack"], "Resource": "arn:aws:cloudformation:us-east-1:159177056493:stack/subdesk-api-dev/*" },
+    { "Sid": "SAMArtifactBucket", "Effect": "Allow", "Action": ["s3:CreateBucket","s3:PutObject","s3:GetObject","s3:ListBucket","s3:PutEncryptionConfiguration","s3:PutLifecycleConfiguration","s3:PutBucketTagging"], "Resource": ["arn:aws:s3:::aws-sam-cli-managed-*", "arn:aws:s3:::aws-sam-cli-managed-*/*"] },
+    { "Sid": "LambdaScoped", "Effect": "Allow", "Action": ["lambda:CreateFunction","lambda:GetFunction","lambda:UpdateFunctionCode","lambda:UpdateFunctionConfiguration","lambda:DeleteFunction","lambda:GetFunctionConfiguration","lambda:ListVersionsByFunction","lambda:TagResource","lambda:ListTags"], "Resource": "arn:aws:lambda:us-east-1:159177056493:function:TicketApiFunction" },
     { "Sid": "FunctionUrlScoped", "Effect": "Allow", "Action": ["lambda:CreateFunctionUrlConfig","lambda:GetFunctionUrlConfig","lambda:UpdateFunctionUrlConfig","lambda:DeleteFunctionUrlConfig","lambda:AddPermission","lambda:RemovePermission"], "Resource": "arn:aws:lambda:us-east-1:159177056493:function:TicketApiFunction" },
     { "Sid": "TableScoped", "Effect": "Allow", "Action": ["dynamodb:CreateTable","dynamodb:DescribeTable","dynamodb:DeleteTable","dynamodb:UpdateTable","dynamodb:TagResource","dynamodb:ListTagsOfResource"], "Resource": "arn:aws:dynamodb:us-east-1:159177056493:table/subdesk-api-dev-*" },
-    { "Sid": "LogsReadScoped", "Effect": "Allow", "Action": ["logs:DescribeLogGroups","logs:ListTagsForResource"], "Resource": "arn:aws:logs:us-east-1:159177056493:log-group:/aws/lambda/TicketApiFunction*" },
+    { "Sid": "LogsScoped", "Effect": "Allow", "Action": ["logs:DescribeLogGroups","logs:ListTagsForResource","logs:CreateLogGroup","logs:PutRetentionPolicy","logs:TagResource","logs:DeleteLogGroup"], "Resource": "arn:aws:logs:us-east-1:159177056493:log-group:/aws/lambda/TicketApiFunction*" },
     { "Sid": "CFNRolesLifecycle", "Effect": "Allow", "Action": ["iam:CreateRole","iam:GetRole","iam:GetRolePolicy","iam:PutRolePolicy","iam:DeleteRolePolicy","iam:DeleteRole","iam:TagRole","iam:UntagRole","iam:ListRolePolicies","iam:ListAttachedRolePolicies","iam:ListInstanceProfilesForRole","iam:UpdateAssumeRolePolicy"], "Resource": "arn:aws:iam::159177056493:role/subdesk-api-dev-*" },
     { "Sid": "PassRoleToStackRolesOnly", "Effect": "Allow", "Action": "iam:PassRole", "Resource": "arn:aws:iam::159177056493:role/subdesk-api-dev-*", "Condition": { "StringEquals": { "iam:PassedToService": "lambda.amazonaws.com" } } },
     { "Sid": "WhoAmI", "Effect": "Allow", "Action": "sts:GetCallerIdentity", "Resource": "*" }
@@ -72,8 +87,9 @@ Console → Billing → Budgets → Alerts → Create: Monthly cost, actual spen
 ## 4. GitHub — Environment `dev`
 
 Repo → Settings → Environments → **New environment**: `dev`.
-- **Required reviewers**: tú mismo (esto ES el visto I6 auditable de cada deploy).
-- **Secrets** (6): `TELEGRAM_BOT_TOKEN` (el de tu bot de prueba de @BotFather), `ADMIN_API_KEY` (genéralo tú, p. ej. `node -e "console.log(require('crypto').randomUUID())"` — ≥16 chars por AllowedPattern), `TELEGRAM_WEBHOOK_SECRET` (igual, otro random), `AWS_159177056493`, `AWS_REGION` (puede ser *variable*, no secreto: `us-east-1`), `AWS_ROLE_ARN` (el ARN del paso 2).
+- **Required reviewers**: **NO se ponen** (**D-48**, visto del usuario 2026-11-22). El visto I6 de un deploy es **la acción que arranca el workflow**: el push a `main` que el orquestador solo hace con tu autorización (y en `prune.yml`, el `workflow_dispatch` + el literal exacto). No existe ya la "aprobación en Actions".
+- **Deployment branches → Selected branches: solo `main`**, y **bypass de administradores DESACTIVADO**. Esto sí es un candado, y es el que cubre el hueco que dejó quitar los reviewers: el trust del rol fija el claim `sub = repo:Pathles5/subdesk-api:environment:dev` pero **no la rama**, así que sin esta política cualquier rama cuyo job declarara `environment: dev` obtendría credenciales y desplegaría ese código. Estado verificado por API el 2026-11-22: `deployment_branch_policy.custom_branch_policies = true`, `branch_policies = [{name: "main", type: "branch"}]` (id 67773148), `can_admins_bypass = false`, `protection_rules = ["branch_policy"]`. Comandos exactos en §7b.
+- **Secrets** (6): `TELEGRAM_BOT_TOKEN` (el de tu bot de prueba de @BotFather), `ADMIN_API_KEY` (genéralo tú, p. ej. `node -e "console.log(require('crypto').randomUUID())"` — ≥16 chars por AllowedPattern), `TELEGRAM_WEBHOOK_SECRET` (igual, otro random), `AWS_ACCOUNT_ID`, `AWS_REGION` (puede ser *variable*, no secreto: `us-east-1`), `AWS_ROLE_ARN` (el ARN del paso 2).
 
 ## 5. Bot de prueba (2 min, gratis)
 
@@ -83,19 +99,50 @@ Repo → Settings → Environments → **New environment**: `dev`.
 
 - Rol: trust con condición exacta + policy sin `Resource: "*"` (salvo `sts:GetCallerIdentity`, inerte).
 - Provider: sub claim apunta a `environment:dev`.
-- GitHub: environment con reviewer = usuario; secretos presentes por NOMBRE (nunca valores).
+- GitHub: environment `dev` con **política de ramas = `main`** y `can_admins_bypass: false`, verificado por `gh api` (nunca por pantalla — regla de A-02); **sin required reviewers desde D-48, ya no es un hallazgo que buscar**; secretos presentes por NOMBRE (nunca valores) y `AWS_ROLE_ARN` con el ARN del paso 2 **re-pegado por API** (los secretos son write-only: un valor roto solo se arregla reescribiéndolo, y el `updated_at` por API es la única evidencia de que el write cayó).
 
 ## 7. Estado del bootstrap dev (se rellena al ejecutar; spec de valores NO secrets en `docs/human/runbook.md` §2.7-D)
 
 | Paso | Estado |
 |---|---|
 | 1. Provider OIDC | ✔ creado el 2026-11-20 — `arn:aws:iam::159177056493:oidc-provider/token.actions.githubusercontent.com` |
-| 2. Rol `SubDeskCiDeployRole` | ✔ **creado el 2026-11-22** vía `bootstrap-oidc-cli.sh` en CloudShell (provider existente saltado; trust `sub=repo:Pathles5/subdesk-api:environment:dev`; policy inline) — ARN: `arn:aws:iam::159177056493:role/SubDeskCiDeployRole` |
+| 2. Rol `SubDeskCiDeployRole` | ✔ **creado el 2026-11-22** vía `bootstrap-oidc-cli.sh` en CloudShell (provider existente saltado; trust `sub=repo:Pathles5/subdesk-api:environment:dev`; policy inline) — ARN: `arn:aws:iam::159177056493:role/SubDeskCiDeployRole`. ✔ **policy A-03 aplicada el mismo día**: la versión viva era de un borrador anterior (sin los permisos que CloudFormation necesita para `ApiLogGroup` ni los tags de la Lambda, y sin la condición `iam:PassedToService`). Se ejecutó **desde local con visto puntual del usuario → D-49** (excepción única de «T-03 no delegable», solo `aws iam put-role-policy`, payload comparado programáticamente contra el heredoc de este script: `IDENTICO: true`). Re-leído de AWS: `LogsScoped` con `CreateLogGroup`/`PutRetentionPolicy`/`TagResource`/`DeleteLogGroup`, `LambdaScoped` con `TagResource`/`ListTags`, `s3:PutBucketTagging`, `ListStacks` fuera, PassRole condicionado ✔. Pre-vuelo con `aws iam simulate-principal-policy`: 22/22 acciones `allowed` y los negativos correctos (`PassRole` sin context key → `implicitDeny`; fuera del prefijo → `implicitDeny`) |
 | 3. Alertas de coste | ✔ **budget `subdesk-api-cent-detect` creado 2026-11-22** (0.01 USD, filtro `user:project$subdesk-api`; formato final en §3b) + alertas de cuenta €3/€10 preexistentes. ⏳ único resto: activar la clave `Project` en Cost allocation tags — imposible hasta el primer deploy (la consola no lista claves sin recursos etiquetados); es paso de T-07+ con recordatorio |
-| 4. Environment `dev` + secretos | ⚠️ **reabierto por el run #2 (2026-11-22)**: los 6 secretos ✔ (solo en el environment; nivel repo vacío) — pero **Required reviewers NO guardados**: `gh api repos/Pathles5/subdesk-api/environments/dev --jq .protection_rules` → `[]` (la confirmación visual no cuajó; el deploy corrió sin Waiting). Y sospecha sobre el valor de `AWS_ROLE_ARN` (OIDC rojo; existe el señuelo `GitHubActionsDeployRole` de otro proyecto). Regla nueva: este paso solo se marca ✔ **verificado por API**, nunca por pantalla |
+| 4. Environment `dev` + secretos | ✔ **cerrado el 2026-11-22 por API** (D-48 cambió el criterio): 6 secretos ✔ (solo en el environment; nivel repo vacío; `AWS_ROLE_ARN` re-pegado por `gh secret set` a las 12:17:16Z con el ARN exacto que devolvió `aws iam get-role`) · **sin required reviewers, deliberadamente** (el visto es el push) · **política de ramas = `main`** con `can_admins_bypass: false` ✔ verificado por API (comandos en §7b). La lectura anterior `protection_rules: []` dejo de ser un hallazgo: ahora el estado esperado es `["branch_policy"]` |
 | 5. Bot de prueba (@BotFather) | ✔ token guardado en el secreto `TELEGRAM_BOT_TOKEN` (usuario 2026-11-22) |
 
-**Resumen (2026-11-22, post-run #2):** pasos 1, 2, 3 (budget) y 5 ✔. El paso 4 queda **reabierto**: secretos ✔ pero reviewers sin guardar (`protection_rules: []` verificado por API tras ver el deploy correr sin Waiting) y rojo OIDC con el señuelo `GitHubActionsDeployRole` pisando. «Bootstrap listo · revisado» exige: **(a)** Required reviewers = Pathles5 (actor 43617338) confirmado por `gh api` (no por pantalla); **(b)** `AWS_ROLE_ARN` = `arn:aws:iam::159177056493:role/SubDeskCiDeployRole` exacto re-pegado; **(c)** relanzar el script solo si (a)/(b) no bastan (el trust ya es correcto — el fallo está del lado del secreto/paste). El activar el tag `Project` sigue pospuesto estructuralmente a T-07+ (ver §3b).
+**Resumen (2026-11-22, post-D-48/D-49 y pre-run #3):** **pasos 1, 2, 3, 4 y 5 ✔ — el bootstrap está completo.** El paso 2 se cerró hoy: la inline policy viva era de un borrador anterior y se sustituyó por la versión auditada de A-03 con `aws iam put-role-policy` **desde local bajo visto puntual del usuario (D-49)**, con el payload comparado programáticamente contra el heredoc de `bootstrap-oidc-cli.sh` y re-leído de AWS después. «Bootstrap listo · revisado» queda cumplido en sus tres condiciones: **(a)** `get-role-policy` muestra `LogsScoped`/`LambdaScoped` con las acciones nuevas, `s3:PutBucketTagging`, sin `ListStacks` y con la condición `iam:PassedToService` ✔; **(b)** environment verificado por API (ramas `main`, `can_admins_bypass: false`, 6 secretos por nombre, `AWS_ROLE_ARN` re-escrito con el ARN correcto el 2026-11-22T12:17:16Z) ✔; **(c)** cero required reviewers **por decisión** (D-48), no por olvido ✔. **No queda ningún paso de bootstrap pendiente**: el único paso que falta para el run #3 es el **push a `main`** con visto explícito del usuario (que bajo D-48 ES el visto I6). El activar el tag `Project` sigue pospuesto estructuralmente a T-07+ (ver §3b).
+
+### 7b. Endurecimiento del environment por API (D-48 · aplicado y verificado 2026-11-22)
+
+Los secretos de un environment son **write-only** y sus reglas de protección **no se ven en la API hasta que se guardan**, así que este bloque es la única forma honesta de declarar el environment como listo. Escribiendo los bodies a fichero (PowerShell 5.1 se come las comillas del JSON inline — misma lección que §3b):
+
+```bash
+# 1) activar políticas de rama custom y dejar reviewers vacíos (a propósito, D-48)
+cat > env.json <<'JSON'
+{ "reviewers": [], "can_admins_bypass": false,
+  "deployment_branch_policy": { "protected_branches": false, "custom_branch_policies": true } }
+JSON
+gh api -X PUT repos/Pathles5/subdesk-api/environments/dev --input env.json
+
+# 2) crear la política de rama. OJO al esquema: name + type (NO deployment_branch_policy,
+#    que es el nombre del bloque en el PUT del environment y produce un 422 aquí).
+cat > main.json <<'JSON'
+{ "name": "main", "type": "branch" }
+JSON
+gh api -X POST repos/Pathles5/subdesk-api/environments/dev/deployment-branch-policies --input main.json
+
+# 3) re-pegar el rol OIDC sin pasar por la UI (valor exacto, sin erratas de paste)
+echo 'arn:aws:iam::159177056493:role/SubDeskCiDeployRole' \
+  | gh secret set AWS_ROLE_ARN --env dev -R Pathles5/subdesk-api
+
+# 4) VERIFICACIÓN (esto, no una pantalla)
+gh api repos/Pathles5/subdesk-api/environments/dev --jq '{rules: [.protection_rules[].type], bypass: .can_admins_bypass, dbp: .deployment_branch_policy}'
+gh api repos/Pathles5/subdesk-api/environments/dev/deployment-branch-policies --jq '.branch_policies[] | {name: .name, type: .type}'
+gh api repos/Pathles5/subdesk-api/environments/dev/secrets --jq '.secrets[] | {name: .name, updated_at: .updated_at}'
+```
+
+Resultado real obtenido: `rules: ["branch_policy"]`, `bypass: false`, `branch_policies: [{main, branch}] (id 67773148)`, 6 secretos con `AWS_ROLE_ARN → 2026-11-22T12:17:16Z` y los otros cinco en 2026-11-20 (el PUT **no** borra secretos). Trampas vividas al aplicarlo: el POST con `deployment_branch_policy=…` da **422 "not a permitted key"**; y hacer el PUT **antes** de crear la política deja el environment con `custom_branch_policies: true` y **cero ramas permitidas** = ningún despliegue puede usar `dev` (bloqueo autoinfligido, reversible con el mismo PUT). Orden seguro: política de rama primero, o PUT+POST en el mismo bloque y verificar después.
 
 ### 3b. Budget de 0.01 USD filtrado por tag — la evidencia I2 ✔ creada en dev el 2026-11-22
 

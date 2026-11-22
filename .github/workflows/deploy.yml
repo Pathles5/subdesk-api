@@ -3,12 +3,20 @@
 # THE ONLY executor of AWS writes for this repo (D-42/I6). Nothing here runs from a
 # workstation; rollback == revert commit + this pipeline re-running (spec §4).
 #
-# The user's "visto" is mechanical and auditable (D-43/D-45): the `dev` GitHub
-# environment has required reviewers, so the `deploy` and `smoke` jobs — the only
-# two jobs that touch AWS — run only after the human approves them in Actions.
-# Two approvals per run are by design (environment approval is per job); do not
-# demote the secrets to repo level to save one click — spec §5.4 puts them in the
-# environment.
+# The user's "visto" is the push to `main` itself (house rule + I6/D-42: the
+# orchestrator pushes only what the user explicitly authorized). `environment: dev`
+# is NOT an approval gate: by the user's explicit decision (D-48) it carries NO
+# required reviewers and nothing ever waits in Actions. What it does provide is
+# fail-closed security: it is the scope holding the app and deploy-context secrets,
+# and it fixes the OIDC subject claim to `repo:Pathles5/subdesk-api:environment:dev`,
+# which is the StringEquals condition of the SubDeskCiDeployRole trust (D-43). Remove
+# the environment pin from a job that touches AWS and the role assumption is denied —
+# no credentials, no deploy.
+# Consequence of D-48 to keep in mind: every push to main runs a full deploy, docs-only
+# commits included, so the human control point is pre-push discipline (I6), not a click
+# after the fact. Do not demote the app secrets to repo level to "simplify" the job
+# either: spec §5.4 scopes them to `dev`, so only a job naming that environment can read
+# them, while repo-level secrets would be reachable from any workflow in the repo.
 #
 # Identity: OIDC ONLY (D-43). No static AWS keys are referenced anywhere in this
 # file (spec §5.3; check.ps1 asserts it). Secrets (spec §5.4): the three app
@@ -163,7 +171,12 @@ jobs:
     name: deploy — sam package + sam deploy via OIDC (stack subdesk-api-dev)
     runs-on: ubuntu-latest
     needs: package
-    # environment: dev — the required-reviewer approval IS the I6 user visto (D-43).
+    # environment: dev — secret scope + OIDC `sub` claim binding, enforced by the
+    # SubDeskCiDeployRole trust condition (D-43): without this pin the job cannot mint
+    # AWS credentials at all (fail-closed). It is NOT a human approval gate — by the
+    # user's explicit decision (D-48) this environment has no required reviewers. The
+    # I6 visto is the push to main that started this run, which the orchestrator only
+    # performs with the user's authorization.
     environment: dev
     timeout-minutes: 15
     steps:
@@ -212,8 +225,11 @@ jobs:
 
       - name: bootstrap-bucket — ensure the SAM artifacts bucket (idempotent)
         # Kept as a step of the deploy job, NOT a standalone job: AWS_ROLE_ARN lives in
-        # the dev environment, so a separate job would demand one more manual approval
-        # every run for zero safety gain (this step runs only after THIS job is approved).
+        # the `dev` environment, and the role it points to is only assumable with the
+        # `…:environment:dev` claim this job's pin produces (D-43). A separate job would
+        # have to pin the same environment just to mint credentials — which costs no
+        # human click, since there are no required reviewers (D-48) — and would replay
+        # configure-aws-credentials for zero safety gain.
         # s3:CreateBucket / ListBucket (head-bucket) / PutLifecycleConfiguration are all
         # in SubDeskCiDeployPolicy's SAMArtifactBucket statement (bootstrap §2).
         # 30-day object expiry mirrors the I2 log-retention rule and keeps the bucket
@@ -289,9 +305,12 @@ jobs:
     name: smoke — 15 live collection cases against the Function URL
     needs: deploy
     runs-on: ubuntu-latest
-    # environment: dev — required because the smoke script needs two dev secrets to
-    # authenticate (spec §5.4 keeps them environment-scoped). This is the second
-    # approval per run; it is intentional, not an oversight.
+    # environment: dev — needed here for two mechanical reasons, neither of them a human
+    # approval (D-48: this environment has no required reviewers, the job never waits for
+    # a click): (a) the smoke script reads two secrets that only exist in the `dev` scope
+    # (spec §5.4 keeps them environment-scoped, never repo-level), and (b) the read-only
+    # OIDC step below can only assume SubDeskCiDeployRole with the `…:environment:dev`
+    # subject claim this pin puts on the token (D-43, fail-closed).
     environment: dev
     timeout-minutes: 10
     steps:

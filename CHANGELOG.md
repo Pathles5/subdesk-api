@@ -1,8 +1,20 @@
 # CHANGELOG — SubDesk API
 
-Actualizado: fase 03 · 2026-11-20
+Actualizado: fase 04 · 2026-11-22
 
 Cambios por versión, la más nueva primero. Aquí se cuenta **lo que nota una persona**: endpoints que empiezan a responder, comandos que aparecen, variables nuevas, rupturas y migraciones. El contrato vinculante es `docs/api/openapi.yaml`; el proceso interno vive en `docs/specs/**` y `DECISIONS.md`.
+
+## Proceso — Fase 04: modelo de visto de la pipeline y endurecimiento (2026-11-22, sin versión nueva)
+
+Cero cambios en endpoints, en el contrato y en el `template.yaml`. Lo que cambia es **cómo se autoriza un despliegue**, y afecta a cualquiera que opere el repo:
+
+- **No hay aprobación manual en GitHub Actions (D-48).** El environment `dev` se queda **sin *required reviewers*, deliberadamente**: un run nunca queda en *Waiting*. El visto I6 es **la acción que arranca el workflow** — el push a `main` que el orquestador solo hace con tu autorización (deploy) y el `workflow_dispatch` con el literal exacto (prune). `environment: dev` se sigue declarando en todo job que mute AWS, pero por lo que aporta: scope de secretos y el claim OIDC `sub = repo:…:environment:dev` que exige el trust del rol (D-43, fail-closed). **Consecuencia asumida: todo push a `main` despliega, incluidos los commits de solo docs** (spec 04, enmienda A-03; enmiendas a constitución I6 y `AGENTS.md` §4 F04).
+- **El hueco que eso abrió está cerrado por rama, no por reviewers:** política de *deployment branches* con **una única regla `main`** (id 67773148) y **`can_admins_bypass: false`**; estado vivo `protection_rules: ["branch_policy"]`. Aplicado y **verificado por API**, no por pantalla: comandos y las dos trampas del esquema en `docs/specs/04-pipeline/bootstrap-oidc.md` §7b.
+- **Drift de permisos corregido (A-03.3 → D-49).** La policy inline viva del rol de CI era de un borrador anterior y no bastaba para que CloudFormation opere contra la sesión del rol (`sam deploy` no pasa `--role-arn`): añadidos `logs:CreateLogGroup|PutRetentionPolicy|TagResource|DeleteLogGroup`, `lambda:TagResource|ListTags`, `s3:PutBucketTagging`; fuera `cloudformation:ListStacks`; `iam:PassRole` con su condición `iam:PassedToService`. **Aplicada el 2026-11-22** con visto puntual del usuario y payload comparado programáticamente contra `bootstrap-oidc-cli.sh`; evidencia re-leída con `get-role-policy` y pre-Flight `simulate-principal-policy` (**22/22 `allowed`**, dos negativos de `PassRole` en `implicitDeny`). Es la **única** escritura AWS local autorizada y no abre precedente (D-49).
+- **Compuerta nueva, mecanizada (A-03):** `pnpm run check` exige ahora `environment:` **a nivel de job** en todo job que contenga `sam deploy|package|delete`, `create-change-set`, `execute-change-set`, `delete-stack` o `cloudformation deploy`, descartando líneas de comentario. Probado no-vacío con dos workflows sintéticos (`[FAIL]` ambos; los reales `[PASS]`).
+- **Dos realidades que iban contradichas por los docs:** `prune.yml` **no** ejecuta `sam delete` (hace `aws cloudformation delete-stack` + sondeo `describe-stacks`, la opción menos privilegiada) y su literal de confirmación es **`BORRO-SUBDESK-API-DEV`**, no el del diseño original.
+- **Estado del pipeline:** run #2 (push `2efcd31`) dejó la evidencia C1 — `verify` ✓ 32 s y `package` ✓ 11 s en runner real — y `deploy` ✗ en OIDC con **cero recursos AWS creados** (0 tablas, sin stack, sin roles `subdesk-api-dev-*`, bucket SAM inexistente; confirmado por API el 2026-11-22). Causa raíz corregida (secreto `AWS_ROLE_ARN` re-pegado con el ARN exacto). **El run #3 espera solo el push autorizado.**
+- **Documentación tocada por esta tanda:** `docs/human/runbook.md` (§1 regla de oro, §2 completo con el modelo D-48, §2.7 checklist de bootstrap, §4.1 prune, §6 rollback), `docs/human/technical/operations.md` (tabla de compuertas + sección de despliegue/verificación por API + nota del esquema real de `simulate-principal-policy`), `README.md` (flujo de despliegue), `docs/human/diagrams/deployment.mmd`/`.svg` (el paso de aprobación humana ya no existe en el diagrama).
 
 ## 0.1.0 — Fase 03: infraestructura como código, validada en seco (2026-11-20)
 
