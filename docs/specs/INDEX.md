@@ -29,6 +29,7 @@ Fases futuras (fuera de la v1 del brief, para memoria):
 | 10 | Query por estado con GSI si el volumen justifica abandonar el `Scan` (I5) | waiting | Decidir umbral de revisión de volumen en Fase 09 |
 | 11 | Panel frontend consumidor (fuera de este repo) | waiting | Solo cuando los contratos de Fase 01 estén congelados (✅ congelados el 2026-11-19) |
 | 12 | Bot de Telegram `subdesk-bot` (proyecto-hijo, fuera de este repo): comandos, botones de suscripción, catálogo | waiting | Diseño registrado en D-38 + `docs/human/technical/bot-plan.md`; aterrizaje tras la Fase 08 de esta API (§6 de bot-plan) |
+| 13 | **Subagente `security-reviewer` + actualización del harness** (swarm, matriz de despacho, whitelist de agentes del orquestador) | waiting | **D-47** (apuntado por el usuario 2026-11-22): disparar al cierre de F08 (MVP) o antes del E2E con bot real de F09. Alcance propuesto: pase de seguridad por fase (superficie + threat model, dependencias/lockfile/allowBuilds/patches, IAM del template, secretos en logs/respuestas/ejemplos, postura de la pipeline OIDC). Implica editar AGENTS §3/§3a, `.opencode/agents/*.md` y la lista de agentes lanzables — change control con visto explícito |
 
 ## Punto de retomada (2026-11-20, cierre de Fase 03)
 

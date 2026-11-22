@@ -7,6 +7,7 @@ node_modules/
 # Logs and generated, non-committed documentation output (I8d)
 *.log
 docs/api/api.html
+dist/
 
 # OS noise
 .DS_Store

@@ -188,6 +188,15 @@ El invariante I2/D-26 dice: una sola región (`us-east-1`), una sola tabla `Stan
 
 Comprobación de gasto, una vez desplegado, siempre de solo lectura: `aws ce get-free-tier-usage --region us-east-1` y la alarma de `EstimatedCharges` (no sustituye a revisar el uso real de RCU/WCU en la consola de DynamoDB).
 
+### 5.1 Análisis de costes por tag (`Project=subdesk-api`) — visto de usuario 2026-11-22
+
+Estrategia: **un tag común en todo recurso taggeable del stack** (tabla, Lambda, rol, log group y URL; la Permission no admite y cuesta $0) → dos usos:
+
+1. **Budget del céntimo** (bootstrap §3b): filtro `Cost Filters: Tag = project/subdesk-api`, umbral €0.01 actual — la evidencia I2 real (las alertas globales de €3/€10 siguen como red gruesa de cuenta).
+2. **Cost Explorer**: `Group by: Tag → Project`, filtro `subdesk-api` → desglose mensual del proyecto contra el techo conocido de D-26.
+
+Requisitos del lado de la consola (manuales, una vez): **Billing → Cost allocation tags → activar la clave `Project`** (tarda ~24 h en verse en filtros; el budget existe desde el día 1 pero no ve nada hasta activada la etiqueta). Limitaciones honestas: hay líneas que el tag no atrapa — el **bucket `aws-sam-cli-managed-default`** (lo crea SAM fuera del stack: se taggea una vez a mano tras el primer deploy, `aws s3api put-bucket-tagging`; su coste es ~$0.0002) y los tags tardan 24–48 h en reflejarse en los reportes. El coste *esperado* del proyecto sigue siendo €0: el análisis por tag existe para que cualquier desvío sea **atribuible el primer día**, no detective a posteriori.
+
 Si alguna premisa resulta **falsa**, el camino no es subir capacidad ni cambiar la tabla a `PAY_PER_REQUEST` por iniciativa propia: es decisión registrada + OK explícito del usuario (vía de escape de D-26, fila D-29 de pendientes).
 
 ## 6. Qué falta para que este runbook esté completo (sección pipeline en F04; cierre en F09)
