@@ -237,7 +237,7 @@ if (Test-Path $pkgPath) {
     Add-Note "No package.json yet (expected before phase 02)."
 }
 
-# --- CI/CD hygiene once workflows exist (phase 08) ---
+# --- CI/CD hygiene once workflows exist (D-42 pipelines-first + D-43 OIDC; rewritten 2026-11-22) ---
 $workflowDir = Join-Path $RepoRoot ".github/workflows"
 if (Test-Path $workflowDir) {
     $workflows = Get-ChildItem $workflowDir -File -Include *.yml,*.yaml -Recurse
@@ -246,13 +246,29 @@ if (Test-Path $workflowDir) {
     }
     foreach ($w in $workflows) {
         $wRaw = Get-Content $w.FullName -Raw -Encoding UTF8
-        foreach ($secret in @("secrets.AWS_ACCESS_KEY_ID", "secrets.AWS_SECRET_ACCESS_KEY")) {
-            if ($wRaw -notmatch [regex]::Escape($secret)) {
-                Add-Note ("{0}: no reference to {1} (expected for an AWS deploy workflow)." -f $w.Name, $secret)
+        # D-43: long-lived AWS keys are forbidden in workflows - OIDC role assumption only.
+        foreach ($keySecret in @("secrets.AWS_ACCESS_KEY_ID", "secrets.AWS_SECRET_ACCESS_KEY", "aws-access-key-id", "awsSecretAccessKey")) {
+            if ($wRaw -match [regex]::Escape($keySecret)) {
+                Add-Fail ("{0}: references '{1}' - long-lived AWS credentials in CI are forbidden; use GitHub OIDC + role-to-assume (D-43/I4)." -f $w.Name, $keySecret)
             }
         }
-        if ($wRaw -match "(?i)(serverless|sls|sam)\s+deploy" -and $wRaw -notmatch "(?i)secrets\.") {
-            Add-Fail ("{0}: a deploy step without GitHub secrets - secrets must never be literal (I4)." -f $w.Name)
+        if ($wRaw -match "(?i)configure-aws-credentials") {
+            if ($wRaw -notmatch "(?i)role-to-assume") {
+                Add-Fail ("{0}: configure-aws-credentials without role-to-assume (OIDC) - misconfigured auth (D-43)." -f $w.Name)
+            }
+            if ($wRaw -notmatch "(?i)id-token:\s*write") {
+                Add-Fail ("{0}: OIDC credential step without 'id-token: write' permission - the job cannot mint a token (D-43)." -f $w.Name)
+            }
+        }
+        # D-42: anything that can change AWS state MUST run behind a GitHub environment (the human-approval gate, I6).
+        if ($wRaw -match "(?i)(sam\s+deploy|sam\s+package|create-change-set|execute-change-set|delete-stack|sam\s+delete)") {
+            if ($wRaw -notmatch "(?im)^\s*environment:") {
+                Add-Fail ("{0}: workflow mutates AWS state without 'environment:' - the approval gate (I6/D-42) would be bypassed." -f $w.Name)
+            }
+        }
+        # D-31: sam build stays out of every pipeline (executes package-manager scripts).
+        if ($wRaw -match "(?i)^\s*(.*\b)?sam\s+build\b") {
+            Add-Fail ("{0}: 'sam build' detected - forbidden in CI and gates (D-31); packaging is scripts/package-lambda.mjs staging." -f $w.Name)
         }
     }
     Add-Note "Workflows found: $($workflows.Count)."
