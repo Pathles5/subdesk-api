@@ -71,14 +71,14 @@ JSON
 )"
 
 echo "Creando rol $ROLE_NAME (o recreando el trust si ya existía)..."
+# OJO: se pasa el JSON INLINE (el CLI lo acepta como documento literal). Usar file:///tmp/... se rompe
+# en Git Bash/MSYS (el aws.exe nativo no ve el /tmp de bash) — bug detectado en el dev el 2026-11-22.
 if aws iam get-role --role-name "$ROLE_NAME" >/dev/null 2>&1; then
   echo "  el rol ya existe: actualizando SOLO el trust (no toca la policy inline)."
-  echo "$TRUST" > /tmp/trust.json
-  aws iam update-assume-role-policy --role-name "$ROLE_NAME" --policy-document file:///tmp/trust.json
+  aws iam update-assume-role-policy --role-name "$ROLE_NAME" --policy-document "$TRUST"
 else
-  echo "$TRUST" > /tmp/trust.json
   aws iam create-role --role-name "$ROLE_NAME" \
-    --assume-role-policy-document file:///tmp/trust.json \
+    --assume-role-policy-document "$TRUST" \
     --description "Assumido por GitHub Actions (environment $GITHUB_ENVIRONMENT) para desplegar el stack subdesk-api-dev" \
     --tags Key=Project,Value=subdesk-api >/dev/null
 fi
@@ -101,8 +101,7 @@ POLICY="$(cat <<JSON
 }
 JSON
 )"
-echo "$POLICY" > /tmp/deploy-policy.json
-aws iam put-role-policy --role-name "$ROLE_NAME" --policy-name "$POLICY_NAME" --policy-document file:///tmp/deploy-policy.json
+aws iam put-role-policy --role-name "$ROLE_NAME" --policy-name "$POLICY_NAME" --policy-document "$POLICY"
 
 # ---- 4) Resultado: el AWS_ROLE_ARN que va al environment dev de GitHub ----
 ARN="$(aws iam get-role --role-name "$ROLE_NAME" --query Role.Arn --output text)"
