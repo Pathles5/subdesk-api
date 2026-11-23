@@ -1,6 +1,6 @@
 # Arquitectura técnica — SubDesk API
 
-Actualizado: fase 04 · 2026-11-22
+Actualizado: fase 04 · 2026-11-23
 
 > Documento para quien va a mantener el código. Las decisiones con su historia están en `DECISIONS.md` (se enlazan por ID); los criterios por fase están en `docs/specs/`. El contrato de la API se publica en `docs/api/openapi.yaml` (nace en Fase 01).
 
@@ -123,4 +123,6 @@ Siete variables, todas a través de `src/config.js` (nunca `process.env` suelto 
 - **Fase 03:** rol IAM exacto de menor privilegio (**D-24**, el gate cfn-lint ya lo fijó D-31); spike de empaquetado con pnpm árbol plano (**D-31**).
 - **Fase 04 (pipeline, D-42):** estrategia de CI/CD y secretos (**D-25**, se resuelve ahí). El `setWebhook` y su momento viven en la **Fase 09**.
 - **Futura:** migración a `PAY_PER_REQUEST` (**D-29**, exige OK explícito del usuario).
-- **Estado del registro — VIGENTE a la ola de cierre de la Fase 04 (2026-11-22):** entradas registradas hasta **D-64** (las últimas: D-59 Sid del macro SAM, D-60 los dos statements de la Function URL — cerrado en producción, D-61 `nodejs26.x`/`arm64`, D-62 `serverless-http@4.0.0`, D-63/D-64 evidencia de coste I2); las «filas de pendientes» del snapshot anterior quedaron resueltas en sus fases (D-24 en F03, D-25 en F04). Próximo ID libre: **D-65**. La fuente es la tabla de `DECISIONS.md` y el punto de retomada de `INDEX.md`.
+- **Estado del registro — SNAPSHOT histórico fechado de la ola de cierre de la Fase 04 (2026-11-22), superado por el punto siguiente:** entradas registradas hasta **D-64** (las últimas: D-59 Sid del macro SAM, D-60 los dos statements de la Function URL — cerrado en producción, D-61 `nodejs26.x`/`arm64`, D-62 `serverless-http@4.0.0`, D-63/D-64 evidencia de coste I2); las «filas de pendientes» del snapshot anterior quedaron resueltas en sus fases (D-24 en F03, D-25 en F04). Próximo ID libre: **D-65**. La fuente es la tabla de `DECISIONS.md` y el punto de retomada de `INDEX.md`.
+
+**Registro vigente al 2026-11-23: hasta D-72 (D-68 SDK empaquetado, D-69 `TG_UPDATE_NS`, D-70 gate antes del parser, D-71 `allowed_updates`, D-72 smoke vivo con ticket sintético); próximo ID libre D-73.** La línea anterior («hasta D-64, próximo D-65») queda como *snapshot* fechado de la ola de cierre de la Fase 04; lo vinculante es este registro y su fuente, `DECISIONS.md`/`INDEX.md`.

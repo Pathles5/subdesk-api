@@ -1,0 +1,75 @@
+%% api-flow.mmd - flujos por endpoint de SubDesk API: cliente -> Function URL -> router -> middleware
+%% -> service -> repository, con los caminos de error.
+%% Actualizado: fase 05 · 2026-11-23 (nace con la Fase 05: ingesta POST /webhook/telegram dibujada
+%% VIVA con su orden de evaluacion congelado en spec 05 §5.1 - 11 reglas, primera que casa gana -;
+%% las otras tres rutas siguen en stub 501 y se dibujan como OBJETIVO con su fase: GET F06,
+%% PATCH F07, reply F08. D-70: el gate de secreto va ANTES del parser. D-62/D-68: adaptador
+%% serverless-http 4.0.0 y SDK empaquetado con la funcion.)
+%% Fuente versionada; el .svg se regenera con `pnpm run docs:diagrams` (D-33/D-41, local, sin CDN: I8d).
+flowchart TD
+    TG["Telegram Bot API<br/>reintenta si no recibe 2xx;<br/>no conserva updates mas de 24 h"]
+    PANEL["Panel de administracion<br/>(fase 11, fuera de este repo)"]
+
+    subgraph EDGE["Borde publico - eu-west-1 (fuente unica: infra/deployment.env, D-54)"]
+        URL["AWS Lambda Function URL<br/>auth NONE + CORS<br/>2 statements de permiso (D-60)"]
+        FN["Lambda TicketApiFunction<br/>nodejs26.x · arm64 · 256 MB · 30 s<br/>PROVISIONED 25 RCU / 25 WCU (D-26)"]
+        ADP["src/lambda.js<br/>serverless-http 4.0.0 exacta (D-62)"]
+    end
+
+    TG -->|"POST /webhook/telegram<br/>+ X-Telegram-Bot-Api-Secret-Token"| URL
+    PANEL -->|"GET/PATCH/POST /api/*<br/>+ x-api-key"| URL
+    URL --> FN --> ADP --> APP
+
+    APP["src/app.js - Express 5<br/>sub-arbol webhook montado ANTES del parser global"]
+
+    %% ---------------- webhook (VIVO desde Fase 05) ----------------
+    APP --> WH["/webhook/telegram<br/>src/routes/telegram.js"]
+    WH --> SEC{"secreto valido?<br/>timingSafeEqual sobre digests SHA-256<br/>(D-70: gate ANTES del parser)"}
+    SEC -->|"ausente o distinto"| E403["403 FORBIDDEN<br/>invalid webhook secret"]
+    SEC -->|"identico"| PARSE["express.json - limit 64kb"]
+    PARSE -->|"rechazo del parser:<br/>JSON invalido, demasiado grande,<br/>charset o encoding no soportados"| IGNPU["200 ignored: unsupported_update"]
+    PARSE -->|"cuerpo parseado"| UID{"update_id entero mayor o igual que 1?"}
+    UID -->|"no"| IGNPU
+    UID -->|"si"| MSG{"message presente y objeto?"}
+    MSG -->|"no: callback_query, channel_post,<br/>edited_message, poll, inline_query..."| IGNPU
+    MSG -->|"si"| CHAT{"message.chat.id utilizable?<br/>^-?[0-9] 1 a 20 digitos"}
+    CHAT -->|"no"| IGNCF["200 ignored: chat_not_found"]
+    CHAT -->|"si"| TXT{"message.text presente y string?"}
+    TXT -->|"no"| IGNNT["200 ignored: no_text"]
+    TXT -->|"si"| TRIM{"text.trim() no vacio?"}
+    TRIM -->|"vacio o solo espacios"| IGNEM["200 ignored: empty_message"]
+    TRIM -->|"con contenido"| LEN{"text.length menor o igual que 4096?"}
+    LEN -->|"mas largo: nunca se trunca"| IGNPU
+    LEN -->|"dentro del limite"| SVC
+
+    SVC["src/services/ticketService.js<br/>construye el item de 9 atributos:<br/>id = uuidv5 TG_UPDATE_NS 'tg:'+update_id (D-69)<br/>status PENDING · message_content integro sin trim<br/>username ausente si no hay ninguno"]
+    SVC --> REPO["src/repositories/ticketRepository.js<br/>UNICO sitio con AWS SDK (D-68, ESLint de capas)"]
+    REPO -->|"PutItem ConditionExpression<br/>attribute_not_exists(id) - 0 lecturas"| DDB[("DynamoDB TicketsTable<br/>PK id · SSE ENABLED · sin TTL")]
+    DDB -->|"escrito"| OK200["200 received: true"]
+    DDB -->|"ConditionalCheckFailedException"| IGNDU["200 ignored: duplicate<br/>(la condicion fallida TAMBIEN consume WCU)"]
+    DDB -->|"throttling terminal u otro error"| GUARD
+    REPO -.->|"excepcion no esperada"| GUARD
+    SVC -.->|"excepcion no esperada"| GUARD
+    GUARD["src/middleware/webhookGuard.js<br/>absorbe cualquier error del sub-arbol<br/>log de una linea sin contenido (D-18)"]
+    GUARD --> IGNER["200 ignored: internal_error"]
+
+    %% ---------------- /api/* (stub hasta F06-F08) ----------------
+    APP --> API["/api/* - auth x-api-key (apiKey.js)<br/>+ parser global 64kb"]
+    API -->|"sin cabecera"| A401["401 UNAUTHORIZED<br/>missing x-api-key header"]
+    API -->|"clave distinta"| A403["403 FORBIDDEN"]
+    API -->|"rechazo del parser (D-62)"| A400["400 VALIDATION_ERROR<br/>los mismos cinco rechazos que en el<br/>webhook, traducidos distinto (I5)"]
+    API -->|"clave valida"| STUB["501 not implemented yet<br/>GET /api/tickets - Fase 06<br/>PATCH /api/tickets/id - Fase 07<br/>POST /api/tickets/id/reply - Fase 08"]
+    APP -->|"cualquier otra ruta"| A404["404 NOT_FOUND<br/>no route for ..."]
+
+    STUB -.->|"Fase 06-08: sustituye el stub"| SVC2["services + repositories<br/>lectura Scan, mutacion y reply<br/>con sendMessage ANTES de persistir"]
+    SVC2 -.-> DDB
+    SVC2 -.->|"solo Fase 08"| TGSEND["Telegram sendMessage<br/>RESOLVED solo con OK real (I5)"]
+
+    classDef vivo fill:#e8f5e9,stroke:#2e7d32,stroke-width:1px;
+    classDef objetivo fill:#fff8e1,stroke:#f9a825,stroke-dasharray:4 3;
+    classDef err fill:#ffebee,stroke:#c62828;
+    classDef ack fill:#e3f2fd,stroke:#1565c0;
+    class WH,SEC,PARSE,SVC,REPO,GUARD,UID,MSG,CHAT,TXT,TRIM,LEN vivo;
+    class STUB,SVC2,TGSEND,PANEL objetivo;
+    class E403,A401,A403,A400,A404 err;
+    class OK200,IGNPU,IGNCF,IGNNT,IGNEM,IGNDU,IGNER ack;
