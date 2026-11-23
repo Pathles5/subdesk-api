@@ -557,6 +557,16 @@ Formato: ID · fecha · contexto · opciones · elección · motivo · riesgo.
 
 ---
 
+## D-67 · 2026-11-23 · Colección Postman refrescada a la era viva + fichero de environment; los 15 nombres, congelados por la guardia de drift
+
+- **Contexto:** el usuario pidió «genera una colección Postman» al cerrar F04. La colección ya existía (`docs/api/SubDesk.postman_collection.json`, 15 requests con scripts) pero estaba congelada en la era de Fase 02 (2026-11-20, sin tocar desde entonces): `info.name` decía «stub era, Fase 02», la descripción usaba la numeración anterior a D-42 (negocio en 04-07, despliegue en 08), `baseUrl` apuntaba sólo a `http://localhost:3000` y **no existía fichero de environment**, así que no había manera de dispararla contra la URL viva sin editar variables a mano — cuando `docs/api/openapi.yaml:29` ya llevaba la Function URL real desde el cierre de F04.
+- **Opciones:** (a) refresco a la era F04 + environment nuevo, **sin renombrar** ninguna request; (b) regeneración completa con el renumerado de fases en los 15 nombres, que adelanta la deuda A-12(a) y obliga a mover la tabla `EXPECTED` de `scripts/smoke-live.mjs` en el mismo commit; (c) además, colección ampliada con casos nuevos (los cinco rechazos de body-parser de D-62, cuerpo > 64 KB, CORS), que cambia el conteo del smoke.
+- **Elección (visto del usuario 2026-11-23):** (a). Se editan **sólo** `info.name`, `info.description` y las cuatro `variable[*].description`; **nada bajo `item`**. Se crea `docs/api/SubDesk.postman_environment.json` con el `baseUrl` vivo y `adminApiKey`/`webhookSecret` **vacíos y con `type: secret`**.
+- **Motivo:** los 15 nombres de request son las claves de la guardia de drift de `scripts/smoke-live.mjs` (1:1, y ese smoke corre en el job que sigue al despliegue). Renombrar ahora habría obligado a tocar el guardián justo antes de un push cuyo cometido real es re-apilar la clave rotada de T-18, y a volver a tocarlo en F05 cuando los stubs se sustituyan: exactamente el doble trabajo que A-12(a) quiso evitar. La opción (a) entrega lo que el usuario necesita —importar y disparar contra producción— con cero riesgo sobre la compuerta. **A-12(a) queda confirmada, no superseded:** el renumerado del código y de la colección sigue siendo una sola pasada en F05.
+- **Riesgo:** (1) que un lector se confunda con los números de fase viejos dentro de los nombres y descripciones de cada request; mitigación: `info.description` lleva un «aviso de era» explícito que remite a D-42 y a A-12(a), y declara que nada bajo `item` se toca hasta F05 — riesgo menor y visible, no un falso verde. (2) Que alguien commitee un valor real en el environment; mitigación: los dos secretos nacen vacíos con `type: secret` (Postman los enmascara), el fichero entra en el escáner de higiene de `check.ps1` y su propia `description` repite la regla I4 (los valores se rellenan como *current values* locales). (3) Que se crea que rotar el secreto en GitHub cambia la clave viva: la `description` del environment y la de la variable `adminApiKey` dicen explícitamente que la función acepta la clave del **último deploy**. Próximo ID libre: **D-68**.
+
+---
+
 # Pendientes de decisión (se resuelven en su fase, con IDs siguientes)
 
 | Próximo ID | Tema | Fase | Estado |
