@@ -15,14 +15,14 @@ Actualizado: fase 04 · 2026-11-22
 | `PATCH` | `/api/tickets/{id}` | cambiar el estado de un ticket (sin responder al usuario) | cabecera `x-api-key` | `200` con el ticket actualizado |
 | `POST` | `/api/tickets/{id}/reply` | responder al usuario **en su chat de Telegram** y cerrar el ticket | cabecera `x-api-key` | `200` con el ticket `RESOLVED` |
 
-Las cuatro rutas conviven en una sola URL pública. En los ejemplos uso el placeholder `https://SU-URL.lambda-url.eu-west-1.on.aws`; la URL real sale del despliegue de la Fase 04 (pipeline — D-42) y queda registrada en el `README.md` de la raíz. La región del host en el ejemplo es la destino vigente — `eu-west-1`, declarada en `infra/deployment.env` (**D-54**) — pero el host exacto **solo se conoce con el deploy**: trátalo siempre como placeholder hasta que el `README.md` lo fije. El campo JSON `id` de la ruta es el identificador opaco del ticket (un UUID; trátalo como caja negra).
+Las cuatro rutas conviven en una sola URL pública. **El despliegue de la Fase 04 ya ocurrió** (pipeline — D-42; run #8 `45079697512`, stack `subdesk-api-dev` `UPDATE_COMPLETE`) y el host exacto **ya está fijado**: la URL viva es `https://ddndau6zrzk24hgglvag6435640jdxro.lambda-url.eu-west-1.on.aws/`, registrada también en el `README.md` de la raíz. La región — `eu-west-1` — es la declarada en `infra/deployment.env` (**D-54**). En los ejemplos de este documento se mantiene el placeholder genérico `https://SU-URL.lambda-url.eu-west-1.on.aws`, para que nadie copie y pegue contra el entorno real sin querer: al probar de verdad, sustitúyelo por la URL viva de arriba (es un endpoint público, sin credenciales en la URL; la autenticación va en cabeceras). El campo JSON `id` de la ruta es el identificador opaco del ticket (un UUID; trátalo como caja negra).
 
 ### Autenticación, en dos frases
 
 - **`/api/*`** (lo que llama tu panel): cabecera `x-api-key` con el valor de la variable de despliegue `ADMIN_API_KEY`. Falta o está vacía → `401`; presente pero distinta → `403`. La comprobación ocurre antes de tocar la base de datos.
 - **`/webhook/telegram`** (lo que llama Telegram): cabecera `X-Telegram-Bot-Api-Secret-Token` con el secreto que se registró al configurar el webhook (variable `TELEGRAM_WEBHOOK_SECRET`). Ausente o distinto → `403`. Es **la única excepción** al `200` garantizado del webhook (se explica más abajo).
 
-En este documento todos los valores son placeholders (`SU_CLAVE`, `SU_SECRETO`, `SU-URL`); ningún valor real va en el repo ni en la documentación. La rotación de ambas claves es una operación documentada en el `runbook.md` (Fase 09).
+En este documento todas las credenciales de los ejemplos son placeholders (`SU_CLAVE`, `SU_SECRETO`; `SU-URL` es el host genérico): ningún secreto ni clave real va en el repo ni en la documentación. La única excepción es la URL pública del despliegue, fijada arriba — un endpoint no es un secreto y no lleva credenciales. La rotación de ambas claves es una operación documentada en el `runbook.md` (Fase 09).
 
 ---
 
@@ -50,7 +50,7 @@ Respuesta: `200 {"received": true}` — y el ticket queda listo para aparecer en
 | `duplicate` | este `update_id` ya se procesó antes (es el reintento legítimo de Telegram: no se duplica el ticket) |
 | `internal_error` | algo interno falló; el guard del webhook lo convierte en `200` para cerrar el bucle de reintentos y el suceso queda en los logs, no en la respuesta |
 
-Las definiciones de los seis motivos están **congeladas** en la spec de Fase 01 §5.1 (enmienda A-01): la Fase 04 las implementa tal cual, no las reabre. Para ti como consumidor los tres primeros significan lo mismo: `200`, ningún ticket creado, no reintentes.
+Las definiciones de los seis motivos están **congeladas** en la spec de Fase 01 §5.1 (enmienda A-01): la Fase 05 las implementa tal cual, no las reabre (la renumeracion pipelines-first D-42 movio la ingesta de la antigua Fase 04 a la 05). Para ti como consumidor los tres primeros significan lo mismo: `200`, ningún ticket creado, no reintentes.
 
 Ejemplos de ignoro:
 
@@ -106,7 +106,7 @@ Tres cosas que conviene saber:
 
 - **`username` y `response_text` pueden faltar** en el JSON: el primero si el usuario de Telegram no tiene nombre de usuario ni nombre propio; el segundo hasta que alguien responde el ticket. El resto de campos están siempre.
 - **El cursor es opaco**: es un secreto interno de paginación del almacén. No lo parses, no lo generes tú, no asumas nada de su contenido; solo reenvíalo tal cual en `cursor` para pedir la siguiente página, y `next_cursor: null` significa fin de la cola.
-- **El `id` de los ejemplos es ilustrativo**: no es el UUID v5 real de ningún `update_id` (el namespace `TG_UPDATE_NS` se congela en la Fase 04 con la ingesta, D-39, y entonces se regeneran los ejemplos, D-35). Para tu panel es simplemente una cadena opaca que no cambias tú.
+- **El `id` de los ejemplos es ilustrativo**: no es el UUID v5 real de ningún `update_id` (el namespace `TG_UPDATE_NS` se congela en la Fase 05 con la ingesta, D-39 - la renumeracion pipelines-first D-42 movio la ingesta de la antigua Fase 04 a la 05, y entonces se regeneran los ejemplos, D-35). Para tu panel es simplemente una cadena opaca que no cambias tú.
 - **Nota de honestidad sobre el orden:** `created_at` descendente está garantizado *dentro de cada página*. Mientras la cola esté en el volumen objetivo (hasta unos 1.000–2.000 tickets), una sola página cubre todo y el matiz no se nota. Si el volumen crece, el orden entre páginas puede no ser estricto; la respuesta prevista es una mejora interna del servidor (migrar a índice y `Query`, fase futura), **no** un cambio de contrato. Tu panel puede tratar `next_cursor` como única forma de avanzar.
 
 Respuestas: `200`, `400` (filtros inválidos), `401` (falta `x-api-key`), `403` (clave incorrecta).

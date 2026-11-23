@@ -3,7 +3,7 @@
 # Ruta ÚNICA del contrato (D-34). Cambios = enmienda en docs/specs/01-modelo-contratos/spec.md + DECISIONS.md.
 # Lint: `pnpm run validate:api` = `redocly lint docs/api/openapi.yaml` (@redocly/cli, decisión D-33;
 # la instalación de la devDep con versión exacta ocurre en Fase 02 — antes de eso, este archivo se valida a mano).
-# Diagramas: los .mmd/.svg del flujo por endpoint (api-flow) se crean en Fase 04, cuando exista la
+# Diagramas: los .mmd/.svg del flujo por endpoint (api-flow) se crean en Fase 05, cuando exista la
 # implementación que representan (I8: nada vacío ni por adelantado); la exportación local es `pnpm run docs:diagrams` (@mermaid-js/mermaid-cli, D-33).
 # Actualizado: fase 04 · 2026-11-22
 openapi: 3.1.0
@@ -26,8 +26,8 @@ info:
   contact:
     name: SubDesk API — contracto mantenido por el orquestador
 servers:
-  - url: https://REPLACE_ME.lambda-url.eu-west-1.on.aws
-    description: "Lambda Function URL (placeholder; el valor real llega con el primer apilado por pipeline, Fase 04, I6). La region del host no es un literal propio: se declara una vez en infra/deployment.env (D-54)."
+  - url: https://ddndau6zrzk24hgglvag6435640jdxro.lambda-url.eu-west-1.on.aws
+    description: "Lambda Function URL REAL del stack subdesk-api-dev en eu-west-1 (apilada por la pipeline en Fase 04, run 45065067527; D-42/I6). Sustituye al host provisional que este contrato declaraba pendiente del primer apilado. Es una URL publica sin credenciales, no un secreto (I4): la autenticacion viaja en cabeceras (x-api-key en /api/*, X-Telegram-Bot-Api-Secret-Token en /webhook/telegram). Si el stack se demoliera y recreara la URL cambiaria: la fuente de verdad es el Output FunctionUrl de `aws cloudformation describe-stacks --stack-name subdesk-api-dev --region eu-west-1`, replicado en README.md. La region del host no es un literal propio: se declara una vez en infra/deployment.env (D-54)."
 
 tags:
   - name: webhook
@@ -341,10 +341,10 @@ components:
   schemas:
     TicketId:
       type: string
-      description: UUID (RFC 4122, variante v5 determinista de `tg:<update_id>`; namespace fijo `TG_UPDATE_NS`, se congela en `src/utils/ids.js` en la Fase 04 — primer consumidor real (D-39) — y cambiarlo exige enmienda; D-19).
+      description: UUID (RFC 4122, variante v5 determinista de `tg:<update_id>`; namespace fijo `TG_UPDATE_NS`, se congela en `src/utils/ids.js` en la Fase 05 — primer consumidor real (D-39; la renumeracion pipelines-first D-42 movio la ingesta de la antigua Fase 04 a la 05) — y cambiarlo exige enmienda; D-19).
       pattern: "^[0-9a-f]{8}-[0-9a-f]{4}-5[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
       examples:
-        - "2f6cf473-16d5-5b61-9a3f-08e1a0d1f4e7"   # ilustrativo: NO es el v5 real de ningun update_id; los ejemplos de id/cursor se regeneran al congelar TG_UPDATE_NS en Fase 04 (D-35, D-39)
+        - "2f6cf473-16d5-5b61-9a3f-08e1a0d1f4e7"   # ilustrativo: NO es el v5 real de ningun update_id; los ejemplos de id/cursor se regeneran al congelar TG_UPDATE_NS en Fase 05 (D-35, D-39; la ingesta se movio de fase por D-42)
 
     TicketStatus:
       type: string

@@ -54,15 +54,32 @@ Parameters:
 # Cost-allocation tags (added in Fase 04 at the user's request): every taggable
 # resource carries Project=subdesk-api and, where the form allows, Stack=<stack
 # name>. This is what makes the $0-budget evidence (I2) auditable end to end: the
-# Billing budget (EUR 0.01) filters by Cost Filters { "Tag": ["project/subdesk-api"] }
-# and Cost Explorer groups by the same tag. The Lambda tag is REQUIRED — without a
+# AWS Budgets guard 'subdesk-api-cent-detect' (0.01 USD/month — USD, not EUR —
+# alert ACTUAL GREATER_THAN 0.01) exists to catch the first cent of cost (I2).
+# Live filter: the legacy CostFilters field { "TagKeyValue":
+# ["user:Project$subdesk-api"] } — 'Project' CAPITALIZED, the key the resources
+# really carry; tag keys are case-sensitive and the old unsupported "Tag":
+# ["project/subdesk-api"] form matched nothing — a blind guard (false green,
+# D-64). Attribution also needs Project ACTIVE as a cost allocation tag
+# (Inactive until 2026-11-22, D-63): empty tag results are NOT proof of $0.
+# The Lambda tag is REQUIRED — without a
 # tag on the function itself its costs never appear in tag filters. On the CFN-
 # native resources the Stack value is !Ref AWS::StackName (byte-identical to
 # 'subdesk-api-dev' in dev, D-25, and it stays honest if the template is re-hosted
 # — runbook 2.7 checklist item 3); on the SAM function it is the literal, for the
 # reason documented in that resource's comment. AWS::Lambda::Url supports no Tags
 # property and AWS::Lambda::Permission neither supports Tags nor bills anything.
-# Enabling the tags in Billing (cost allocation tags) remains a MANUAL user step.
+# Enabling the tag keys as cost allocation tags is NOT templatable: it is
+# account billing configuration living outside the stack, hence a manual step.
+# Already DONE: Project and Stack read Active since 2026-11-22, executed by the
+# orchestrator with the user's explicit visto (D-63). Read-only verification:
+# `aws ce list-cost-allocation-tags` — Cost Explorer is a GLOBAL service, so
+# its endpoint is not the stack region, and region literals in this file must
+# all match the single declared target (D-54; the gate scans comments too).
+# The literal command is documented in docs/human/runbook.md §5.1 (D-63);
+# each key's status must read Active. Consequence on any fresh account: while
+# a key is Inactive, tag-filtered cost analysis returns empty, and empty is
+# NOT proof of $0 — that false green is precisely what D-63 recorded.
 # Tags are metadata only: they change no resource's behavior, capacity or cost.
 Resources:
   TicketsTable:

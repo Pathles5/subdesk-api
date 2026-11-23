@@ -1,12 +1,14 @@
 # Modelo de datos — `TicketsTable`
 
-Actualizado: fase 03 · 2026-11-20
+Actualizado: fase 04 · 2026-11-22
 
 > Documento para quien mantiene el código. Aquí se cuenta **la tabla** en lenguaje humano: qué guarda cada atributo, cómo se deduplica un `update_id` con una sola tabla y sin índices, cómo cambian los estados y qué cuesta cada operación. El contrato vinculante de formas y errores es `docs/api/openapi.yaml`; las reglas con su justificación completa están en la spec de Fase 01 y en `DECISIONS.md` (D-19, D-20, D-21, D-22, D-26).
 
 ## La tabla, en una página
 
 Una sola entidad (el ticket), una sola tabla (`TicketsTable`, DynamoDB Standard, `PROVISIONED` 25/25, una región — I1/I2/D-26). **Esquema estricto:** los atributos no listados se ignoran a la lectura y nunca se escriben. Sin índices de ningún tipo (ni GSI ni LSI): prohibidos por I2/D-26 hasta la fase futura 10.
+
+**Estado vivo (revisado en el cierre de la Fase 04, verificado por API el 2026-11-22):** la tabla existe de verdad, desplegada exclusivamente por la pipeline (D-42) en **`eu-west-1`** — región declarada una sola vez en `infra/deployment.env` (D-54) — dentro del stack `subdesk-api-dev` (`UPDATE_COMPLETE`). Nombre físico: **`subdesk-api-dev-TicketsTable-1E0OT8H5KCQKO`**; estado `ACTIVE`, RCU 25 / WCU 25, SSE `ENABLED`, **0 ítems** (los endpoints son stubs `501` hasta las Fases 05–08), sin índices, sin Streams y sin PITR — exactamente lo que este documento describe.
 
 | Atributo | Tipo DynamoDB | Obligatorio | Regla de longitud / formato | De dónde sale |
 |---|---|---|---|---|
@@ -16,7 +18,7 @@ Una sola entidad (el ticket), una sola tabla (`TicketsTable`, DynamoDB Standard,
 | `message_content` | `S` | sí | 1–4096 caracteres | `update.message.text` íntegro. Es el contenido del ticket; **prohibido loguearlo** (D-18: en el log solo va su longitud) |
 | `response_text` | `S` | no (puede faltar) | 1–4096 caracteres | Solo lo escribe `reply` (Fase 07), y **después** del OK de Telegram. Hasta la primera respuesta exitosa el atributo no existe |
 | `status` | `S` | sí | enum cerrado: `PENDING` \| `IN_PROGRESS` \| `RESOLVED`; cualquier otro valor → `400`, nunca escritura | nace en `PENDING` con el webhook; lo cambian `PATCH` y `reply` |
-| `created_at` | `S` | sí | ISO 8601 UTC con `Z` | `utils/time.js` en el alta; **inmutable** después |
+| `created_at` | `S` | sí | ISO 8601 UTC con `Z` | `utils/time.js` (módulo objetivo: nace con la ingesta, Fase 05) en el alta; **inmutable** después |
 | `updated_at` | `S` | sí | ISO 8601 UTC con `Z` | se refresca en **toda** mutación (`PATCH`, `reply`) — regla I5: ninguna escritura silenciosa |
 | `telegram_update_id` | `N` | sí | entero positivo | `update.update_id` de Telegram; se guarda para trazabilidad y correlación con sus logs. **La deduplicación no usa este atributo**: usa el `id` (abajo) |
 
@@ -30,10 +32,10 @@ Telegram reenvía el mismo `update.update_id` si no recibe `2xx` a tiempo. Sin G
 id = uuidv5(TG_UPDATE_NS, "tg:" + update_id)
 ```
 
-- **UUID v5** (nombre-space + SHA-1), no v4: el mismo `update_id` produce **siempre** el mismo `id`, sea cual sea el proceso o el momento que lo reciba. Implementación en `utils/ids.js` con `crypto.createHash('sha1')` (~25 líneas, cero dependencias — I4b), sin paquete `uuid`.
+- **UUID v5** (nombre-space + SHA-1), no v4: el mismo `update_id` produce **siempre** el mismo `id`, sea cual sea el proceso o el momento que lo reciba. Implementación prevista en `utils/ids.js` con `crypto.createHash('sha1')` (~25 líneas, cero dependencias — I4b), sin paquete `uuid`; **el módulo aún no existe**: nace con la ingesta (Fase 05).
 - **Alta = un `PutItem` con condición** `attribute_not_exists(id)`. Si la condición falla, es que el update ya estaba: se responde `200 { "ignored": "duplicate" }` sin escribir nada. Cero lecturas extra, exactitud garantizada, sin carrera entre reintentos concurrentes (si dos llegan a la vez, uno gana y el otro cae en `duplicate`: exactamente lo deseado).
 - **Por qué así (D-19):** la alternativa era un `id` v4 aleatorio + buscar el duplicado antes de escribir — con una sola tabla y sin índices eso obliga a `Scan`, caro y aproximado (carreras) — o una segunda tabla de deduplicación, prohibida por I2. Es el problema caro de la fase, resuelto con una escritura.
-- **La constante de namespace `TG_UPDATE_NS` se congela en la Fase 04** (ingesta), en `src/utils/ids.js` — el momento en que existe su primer consumidor; en Fase 02 no se fijó porque el scaffold no calcula todavía ningún `id` (decisión registrada como D-39; antes este párrafo decía «Fase 02»). Queda documentada (y congelada) en este documento al fijarse. Cambiarla en el futuro rompería la correspondencia `update_id → id` histórica: los reintentos viejos dejarían de deduplicarse. Por eso **modificarla exige enmienda** a la spec de Fase 01 + `DECISIONS.md`, no un refactor. Regenerar entonces los ejemplos de `id`/cursor (D-35).
+- **La constante de namespace `TG_UPDATE_NS` se congela en la Fase 05** (ingesta), en `src/utils/ids.js` — el momento en que existe su primer consumidor; en Fase 02 no se fijó porque el scaffold no calcula todavía ningún `id`. Historia de la fase: D-39 la movió de Fase 02 a la ingesta, que entonces era la Fase 04; la renumeración *pipelines-first* (D-42) desplazó la ingesta a la **Fase 05**, y así lo lista `INDEX.md` como deuda heredada de la Fase 04. Queda documentada (y congelada) en este documento al fijarse. Cambiarla en el futuro rompería la correspondencia `update_id → id` histórica: los reintentos viejos dejarían de deduplicarse. Por eso **modificarla exige enmienda** a la spec de Fase 01 + `DECISIONS.md`, no un refactor. Regenerar entonces los ejemplos de `id`/cursor (D-35).
 - Desviación deliberada anotada en la spec (§9.1): el brief hablaba de "UUID v4". Un `id` v4 impediría la deduplicación exacta sin índices; es reversible solo con un GSI, que I2 no autoriza hasta la fase 10.
 
 ## Estados y transiciones (spec §4.3)
@@ -82,4 +84,4 @@ Dos consecuencias que hay que tener presentes al mantener el código:
 
 - Formas JSON exactas, enum `ignored`, códigos y ejemplos: `docs/api/openapi.yaml` (contrato, propiedad del orquestador; cambiarlo = enmienda — I3).
 - Reglas de implementación (guards en `utils/validation.js`, D-22; middleware `apiKey` y validación del secreto con `crypto.timingSafeEqual`, cierre D-21): spec de Fase 01 §5–§6; la narración para integradores está en `docs/human/functional/api.md`.
-- Capacidad, región y clase de la tabla materializadas: `template.yaml` (Fase 03), vigiladas por los asserts de `check.ps1` (1 tabla, `PROVISIONED` ≤ 25/25, sin GSI/Streams/PITR/auto scaling).
+- Capacidad, región y clase de la tabla materializadas: `template.yaml` (Fase 03; en vivo desde la Fase 04, desplegado exclusivamente por la pipeline — D-42), vigiladas por los asserts de `check.ps1` (1 tabla, `PROVISIONED` ≤ 25/25, sin GSI/Streams/PITR/auto scaling).

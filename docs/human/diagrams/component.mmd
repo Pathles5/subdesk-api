@@ -1,16 +1,22 @@
-%% component.mmd — capas internas de src/ y direccion UNICA de dependencias (D-16, actualizada por D-28)
-%% Actualizado: fase 03 · 2026-11-20
+%% component.mmd — capas internas de src/ y direccion UNICA de dependencias (D-16; adaptador D-28→D-62)
+%% Actualizado: fase 04 · 2026-11-22
 %% Fuente versionada; el .svg se regenera con `pnpm run docs:diagrams` (D-33/D-41, local, sin CDN).
+%% Ola de cierre de Fase 04 (revision de vigencia, spec 02 A-02): cada nudo se marca VIVO (existe
+%% hoy en src/) u OBJETIVO (objetivo de fases futuras, AUN NO EXISTE — verificado contra el arbol
+%% real el 2026-11-23). Fases de handlers renumeradas por D-42 (ingesta 05, lectura 06, mutacion 07,
+%% respuesta 08). Adaptador vivo: serverless-http@4.0.0 exacta (D-62, supersede la 3.2.0 de D-28);
+%% runtime vivo de la funcion: nodejs26.x + arm64 (D-61) — el runtime no es capa de este diagrama,
+%% se dibuja en deployment.mmd.
 flowchart TD
-    LAM["src/lambda.js<br/>serverlessHttp(app) — D-28<br/>UNICO punto que conoce Lambda"]
-    LOC["src/local.js<br/>app.listen(PORT) — pnpm run dev"]
-    APP["src/app.js<br/>createApp(deps): middlewares + routers<br/>+ handler de errores; sin CORS (I4)"]
-    RT["src/routes/<br/>telegram.js · tickets.js<br/>registry.js = fuente unica superficie↔contrato"]
-    MW["src/middleware/<br/>apiKey.js (401/403, timingSafeEqual)<br/>webhookGuard.js (secreto 403; error→200 ignored)"]
-    SVC["src/services/<br/>ticketService · telegramService<br/>(Fases 04–07)"]
-    REPO["src/repositories/<br/>ticketRepository — UNICO DynamoDB<br/>(SDK solo aqui — regla eslint)"]
-    UTIL["src/utils/<br/>http · validation · ids (v5 D-19, F04)<br/>time · logger (D-18)"]
-    CONF["src/config.js<br/>UNICO lector de process.env (D-17)"]
+    LAM["src/lambda.js — VIVO<br/>serverlessHttp(app) con serverless-http@4.0.0 exacta (D-28→D-62)<br/>UNICO punto que conoce Lambda"]
+    LOC["src/local.js — VIVO<br/>app.listen(PORT) — pnpm run dev"]
+    APP["src/app.js — VIVO<br/>createApp(deps): middlewares + routers + handler de errores<br/>+ rechazos del parser de cuerpo → 400 VALIDATION_ERROR (D-62)<br/>sin CORS (I4)"]
+    RT["src/routes/ — VIVO<br/>telegram.js · tickets.js (stubs 501; handlers reales F05–F08)<br/>registry.js = fuente unica superficie↔contrato"]
+    MW["src/middleware/ — VIVO<br/>apiKey.js (401/403, timingSafeEqual)<br/>webhookGuard.js (secreto 403; error→200 ignored)"]
+    SVC["src/services/ — OBJETIVO Fases 05–08 (AUN NO EXISTE)<br/>ticketService · telegramService"]
+    REPO["src/repositories/ — OBJETIVO Fase 05+ (AUN NO EXISTE)<br/>ticketRepository — UNICO DynamoDB<br/>(SDK solo aqui — regla eslint)"]
+    UTIL["src/utils/<br/>VIVO: http.js · logger.js (D-18)<br/>OBJETIVO (AUN NO EXISTE): validation.js · time.js ·<br/>ids.js (UUID v5 D-19 + TG_UPDATE_NS, nace en F05)"]
+    CONF["src/config.js — VIVO<br/>UNICO lector de process.env (D-17)"]
 
     LAM --> APP
     LOC --> APP
@@ -23,5 +29,8 @@ flowchart TD
     REPO --> CONF
     UTIL --> CONF
 
-    EXT1[("DynamoDB<br/>TicketsTable")] -. "SDK en repositorio<br/>(Fase 04)" .-> REPO
-    EXT2["Telegram Bot API<br/>sendMessage"] -. "fetch nativo<br/>(Fase 07)" .-> SVC
+    EXT1[("DynamoDB<br/>TicketsTable — VIVA en eu-west-1<br/>PROVISIONED 25/25 (Fase 04)")] -. "SDK en repositorio<br/>(Fase 05)" .-> REPO
+    EXT2["Telegram Bot API<br/>sendMessage"] -. "fetch nativo<br/>(Fase 08)" .-> SVC
+
+    classDef objetivo stroke-dasharray: 5 5
+    class SVC,REPO objetivo

@@ -399,7 +399,7 @@ if (-not $SkipSecretScan) {
     # Cross-platform exclusion (Windows \ and Linux /): node_modules etc. must never be scanned
     # (the runner verify job has full trees; a Windows-only pattern made the scan slow AND noisy on Linux).
     $excludeRegex = '[\\/](\.git|node_modules|dist|packaged\.yaml|artifacts|build|coverage|\.serverless|\.aws-sam|\.output)([\\/]|$)'
-    $exts = @(".md", ".js", ".mjs", ".cjs", ".ts", ".json", ".yml", ".yaml", ".ps1", ".txt", ".example", ".mmd", ".html", ".graphql")
+    $exts = @(".md", ".js", ".mjs", ".cjs", ".ts", ".json", ".yml", ".yaml", ".ps1", ".sh", ".txt", ".example", ".mmd", ".html", ".graphql")
     $patterns = @(
         @{ name = "Telegram bot token shape"; regex = '\d{8,10}:AA[A-Za-z0-9_-]{25,}' },
         @{ name = "AWS access key id";        regex = 'AKIA[0-9A-Z]{16}' },
@@ -491,6 +491,43 @@ if ($cfnFiles.Count -gt 0) {
         Add-Note "IaC: SAM transform not detected in the scanned files (expected if using SAM syntax)."
     }
     if ($iacRaw -match 'arn:aws:iam::\*|Resource:\s*"?\*"') { Add-Fail "IaC asserts: wildcard IAM resource/policy detected (I4 least privilege)." }
+    # --- CI role policy: zero wildcard Resource, except ONE registered inert exception --------
+    # spec 04 S5.2 promises that this script audits "zero Resource: *" in the CI role policy JSON
+    # published in this repo. That assert did not exist (phase-04 fresh-eyes finding) - the same
+    # family as the dead `sam build` assert of D-50: an ANNOUNCED mechanization that is not
+    # implemented is a green for the wrong reason, which is exactly the defect class this phase
+    # kept finding (D-60 single statement, D-62 adapter, D-63 inactive tag, D-64 lowercase key).
+    # The only admitted wildcard is `sts:GetCallerIdentity` (Sid WhoAmI): that action has no
+    # resource-level permissions at all, so `"*"` grants nothing beyond identity readback. Any
+    # other statement carrying Resource "*" is a least-privilege failure (I4).
+    $ciPolicyFiles = @(
+        (Join-Path $RepoRoot "docs/specs/04-pipeline/bootstrap-oidc-cli.sh"),
+        (Join-Path $RepoRoot "docs/specs/04-pipeline/bootstrap-oidc.md")
+    )
+    $wildcardSids = @()
+    foreach ($cpf in $ciPolicyFiles) {
+        if (-not (Test-Path $cpf)) { continue }
+        $cpLines = Get-Content $cpf -Encoding UTF8
+        for ($ci = 0; $ci -lt $cpLines.Count; $ci++) {
+            $cpLine = $cpLines[$ci]
+            if ($cpLine -notmatch '"Resource"\s*:\s*(\[\s*)?"\*"') { continue }
+            $sidM = [regex]::Match($cpLine, '"Sid"\s*:\s*"([^"]+)"')
+            $actM = [regex]::Match($cpLine, '"Action"\s*:\s*(\[[^\]]*\]|"[^"]*")')
+            $sidName = if ($sidM.Success) { $sidM.Groups[1].Value } else { ('line ' + ($ci + 1)) }
+            $actTxt = if ($actM.Success) { $actM.Groups[1].Value } else { '<no Action found>' }
+            if ($actTxt -notmatch 'sts:GetCallerIdentity') {
+                Add-Fail ('CI role policy: statement ' + $sidName + ' in ' + (Split-Path $cpf -Leaf) + ' carries Resource "*" with Action ' + $actTxt + ' - only sts:GetCallerIdentity may use a wildcard (I4 least privilege; spec 04 S5.2).')
+            } else {
+                $wildcardSids += $sidName
+            }
+        }
+    }
+    if (@($wildcardSids).Count -eq 0) {
+        Add-Note 'CI role policy: no wildcard Resource at all in the audited copies.'
+    } else {
+        $uniqSids = (@($wildcardSids) | Sort-Object -Unique) -join ', '
+        Add-Note ('CI role policy: the only wildcard Resource belongs to ' + $uniqSids + ' (sts:GetCallerIdentity - inert, that action has no resource-level permissions).')
+    }
     # --- Lambda Permission shape asserts (2026-11-22, run 45044899842 attempt 4) --------------
     # CFN's own schema is too permissive to catch this class of bug: Action accepts any
     # `lambda:[a-zA-Z]+` and Principal is a free String, so `Principal: AWS:UrlInvoke` with

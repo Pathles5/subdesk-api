@@ -39,26 +39,34 @@ Panel ──x-api-key─▶│ 1× Lambda · nodejs26.x ESM │  ← 256 MB, 30 
 
 ## Estructura de carpetas y reglas de dependencia (D-16)
 
+Convención del árbol: **[VIVO]** = existe hoy en el repo (verificado contra `src/` y `tests/` el 2026-11-23); **[OBJETIVO]** = objetivo de fases futuras, **aún no existe**.
+
 ```
 src/
-  lambda.js         # UNICA entrada Lambda: serverlessHttp(app) (D-28; versión viva: serverless-http@4.0.0, D-62). Nada de lógica aquí.
-  local.js          # app.listen(PORT) para `pnpm run dev`: mismo árbol, sin adaptador.
-  app.js            # createApp(deps): middlewares globales, montaje de routers, error handler final.
+  lambda.js         # [VIVO] UNICA entrada Lambda: serverlessHttp(app) (D-28; versión viva: serverless-http@4.0.0, D-62). Nada de lógica aquí.
+  local.js          # [VIVO] app.listen(PORT) para `pnpm run dev`: mismo árbol, sin adaptador.
+  app.js            # [VIVO] createApp(deps): middlewares globales, montaje de routers, rechazos del parser de cuerpo → 400 VALIDATION_ERROR (D-62), error handler final.
   routes/
-    telegram.js     # POST /webhook/telegram   → público, ack 2xx garantizada
-    tickets.js      # GET /api/tickets · PATCH /api/tickets/:id · POST /api/tickets/:id/reply
+    telegram.js     # [VIVO, stub 501] POST /webhook/telegram → público, ack 2xx garantizada (handler real: Fase 05)
+    tickets.js      # [VIVO, stub 501] GET /api/tickets · PATCH /api/tickets/:id · POST /api/tickets/:id/reply (handlers reales: Fases 06–08)
+    registry.js     # [VIVO] fuente única de la superficie HTTP: la compara contra openapi.yaml el test de contrato (I8b.4)
   middleware/
-    apiKey.js       # x-api-key vs ADMIN_API_KEY → 401/403 antes de tocar DynamoDB (I4)
-    webhookGuard.js # cualquier excepción → 200 con cuerpo de descarte (I5)
-  services/
-    ticketService.js    # reglas de negocio: enum, idempotencia por update_id, transición a RESOLVED
-    telegramService.js  # único sitio que habla con la Bot API (fetch nativo)
-  repositories/
-    ticketRepository.js # único sitio que conoce DynamoDB y la tabla
-  utils/            # http.js (responses), validation.js, ids.js (UUID v5 determinista con node:crypto, D-19), time.js, logger.js
-  config.js         # única lectura de process.env
-tests/              # unitarios de services + supertest sobre createApp() + tests a nivel de ADAPTADOR (lambda.adapter.test.js) + test de contrato OpenAPI
-template.yaml       # SAM: 1 tabla PROVISIONED + 1 Function + FunctionUrlConfig + 1 rol
+    apiKey.js       # [VIVO] x-api-key vs ADMIN_API_KEY → 401/403 antes de tocar DynamoDB (I4)
+    webhookGuard.js # [VIVO] cualquier excepción → 200 con cuerpo de descarte (I5)
+  services/         # [OBJETIVO Fases 05–08 — aún no existe]
+    ticketService.js    # [OBJETIVO] reglas de negocio: enum, idempotencia por update_id, transición a RESOLVED
+    telegramService.js  # [OBJETIVO] único sitio que habla con la Bot API (fetch nativo)
+  repositories/     # [OBJETIVO Fase 05+ — aún no existe]
+    ticketRepository.js # [OBJETIVO] único sitio que conoce DynamoDB y la tabla
+  utils/
+    http.js         # [VIVO] respuestas con el envelope del contrato
+    logger.js       # [VIVO] log JSON por invocación (D-18)
+    validation.js   # [OBJETIVO Fase 05 — aún no existe] guards manuales (D-22)
+    ids.js          # [OBJETIVO Fase 05 — aún no existe] UUID v5 determinista con node:crypto (D-19) + TG_UPDATE_NS
+    time.js         # [OBJETIVO Fase 05 — aún no existe] created_at/updated_at ISO 8601 UTC
+  config.js         # [VIVO] única lectura de process.env
+tests/              # [VIVO] unitarios de middleware/config + supertest sobre createApp() + tests a nivel de ADAPTADOR (lambda.adapter.test.js, D-62) + test de contrato OpenAPI + tests de pipeline (pre-vuelo, workflows, $GITHUB_ENV)
+template.yaml       # [VIVO] SAM: 1 tabla PROVISIONED + 1 Function + 1 AWS::Lambda::Url + 2 AWS::Lambda::Permission (D-60) + 1 rol + 1 AWS::Logs::LogGroup (spec 03 A-01/A-04)
 docs/human/         # esta documentación (I8)
 ```
 
@@ -66,7 +74,7 @@ Dirección única de dependencias: `lambda|local → app → routes → middlewa
 
 - Nada importa la SDK de AWS fuera de `repositories/`; `telegramService.js` habla con la Bot API con `fetch` nativo (regla exacta: spec §5 + A-08).
 - `createApp()` recibe dependencias inyectadas → los tests levantan la app real sin Lambda, sin DynamoDB y sin Telegram.
-- **CORS: cero líneas en código.** Se declara solo en `FunctionUrlConfig.Cors` del IaC; si Express emitiera también cabeceras CORS, Lambda las duplica y el preflight se rompe (I4).
+- **CORS: cero líneas en código.** Se declara solo en la propiedad `Cors` del recurso nativo `AWS::Lambda::Url` (`TicketApiUrlConfig`) del IaC — no existe un «FunctionUrlConfig» SAM: la URL es CFN-nativa desde la spec 03 A-01, y por eso los dos `AWS::Lambda::Permission` de D-60 hay que declararlos a mano; si Express emitiera también cabeceras CORS, Lambda las duplica y el preflight se rompe (I4).
 
 ### Adaptador Express↔Lambda: `serverless-http@4.0.0` exacta (D-28 → D-62)
 
@@ -108,11 +116,11 @@ Siete variables, todas a través de `src/config.js` (nunca `process.env` suelto 
 | `Scan` | cobra lo **evaluado**, no lo devuelto | el filtro `?status=` no ahorra capacidad; umbral de revisión a `Query`: ~1.000–2.000 items leídos (I5) |
 | Conciencia de coste | sin `provisioned concurrency`, sin auto scaling, sin Web Functions | el techo de gasto es fijo y conocido ($14,24/mes en el peor caso de D-26) |
 
-## Decisiones pendientes (revisado al cerrar Fase 01 · 2026-11-19)
+## Decisiones pendientes (snapshot histórico: revisión del cierre de Fase 01 · 2026-11-19 con viñetas añadidas al cerrar Fase 02 · 2026-11-20 — **no es estado vigente**; el estado vigente es el último punto, y su fuente es `DECISIONS.md`/`INDEX.md`)
 
 - **Fase 01:** D-19/D-20/D-21/D-22 **resueltas el 2026-11-19** (visto del usuario; registro en `DECISIONS.md`): esquema estricto de 9 atributos, `id` UUID v5 determinista + `Put` condicional (dedup exacta sin GSI), contrato de 4 endpoints con envelope único (7 códigos), seguridad de superficie (`timingSafeEqual`; secreto del webhook → 403) y guards manuales sin librerías. Detalle: `docs/human/technical/data-model.md` + `docs/api/openapi.yaml`.
-- **Fase 02 (cerrándose hoy):** ✅ fijada la versión exacta de pnpm (`10.18.1`) y el adaptador definitivo (**D-28**: `serverless-http@3.2.0` —sustituida por **`4.0.0`** en Fase 04, **D-62**: incompatibilidad con `body-parser@2`—, la premisa vendia-v5 de la Fase 00 era falsa); ✅ framework de tests (**D-23**: `node:test` + `supertest` + inyección); ✅ instalado `@redocly/cli@2.81.0` para `validate:api` (**D-33**). Pendientes que sobreviven a la fase: constante `TG_UPDATE_NS` en `src/utils/ids.js` (nace con la ingesta, **Fase 04** — en Fase 02 no hay consumidor); `@mermaid-js/mermaid-cli` + diagramas (**Fase 03**); deuda del harness: huecos de mecanización de `check.ps1` (ver fila 00 en `INDEX.md`).
+- **Fase 02 (cerrándose hoy):** ✅ fijada la versión exacta de pnpm (`10.18.1`) y el adaptador definitivo (**D-28**: `serverless-http@3.2.0` —sustituida por **`4.0.0`** en Fase 04, **D-62**: incompatibilidad con `body-parser@2`—, la premisa vendia-v5 de la Fase 00 era falsa); ✅ framework de tests (**D-23**: `node:test` + `supertest` + inyección); ✅ instalado `@redocly/cli@2.81.0` para `validate:api` (**D-33**). Pendientes que sobreviven a la fase: constante `TG_UPDATE_NS` en `src/utils/ids.js` (nace con la ingesta, **Fase 05** — la renumeración *pipelines-first* D-42 movió la ingesta de la antigua Fase 04 a la 05; en Fase 02 no hay consumidor); `@mermaid-js/mermaid-cli` + diagramas (**Fase 03**, entregado); deuda del harness: huecos de mecanización de `check.ps1` (ver fila 00 en `INDEX.md`).
 - **Fase 03:** rol IAM exacto de menor privilegio (**D-24**, el gate cfn-lint ya lo fijó D-31); spike de empaquetado con pnpm árbol plano (**D-31**).
 - **Fase 04 (pipeline, D-42):** estrategia de CI/CD y secretos (**D-25**, se resuelve ahí). El `setWebhook` y su momento viven en la **Fase 09**.
 - **Futura:** migración a `PAY_PER_REQUEST` (**D-29**, exige OK explícito del usuario).
-- Estado del registro: entradas **registradas** = D-01–D-28, D-30–D-38 (desde hoy también **D-23** y **D-28**); **solo filas de pendientes** (sin entrada todavía) = D-24, D-25, D-29; decisión **vía de escape** futura con OK obligatorio = D-29. Próximo ID libre: **D-39** (la tabla de `DECISIONS.md` es la fuente).
+- **Estado del registro — VIGENTE a la ola de cierre de la Fase 04 (2026-11-22):** entradas registradas hasta **D-64** (las últimas: D-59 Sid del macro SAM, D-60 los dos statements de la Function URL — cerrado en producción, D-61 `nodejs26.x`/`arm64`, D-62 `serverless-http@4.0.0`, D-63/D-64 evidencia de coste I2); las «filas de pendientes» del snapshot anterior quedaron resueltas en sus fases (D-24 en F03, D-25 en F04). Próximo ID libre: **D-65**. La fuente es la tabla de `DECISIONS.md` y el punto de retomada de `INDEX.md`.

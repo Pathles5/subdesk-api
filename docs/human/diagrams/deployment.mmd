@@ -5,10 +5,12 @@
 %% de la documentacion antigua NUNCA existio en produccion: Lambda lo rechaza; ambas aristas de
 %% permiso apuntan a la URL; tanda anterior run #5: etiqueta PREFLIGHT con la evidencia real).
 %% Fuente versionada; el .svg se regenera con `pnpm run docs:diagrams` (D-33/D-41, local, sin CDN).
-%% Estado del derivado: ultimo export del orquestador 2026-11-22 16:50:16, 226.324 B; la fuente
-%% cambio despues (esta tanda D-60/D-61/D-62 y la anterior del run #5) ⇒ RE-EXPORT PENDIENTE por
-%% el orquestador con `pnpm run docs:diagrams` al cierre de la tanda (el documentador no tiene
-%% permiso de shell).
+%% Estado del derivado: el .svg vigente ES re-export de esta fuente (orquestador, `pnpm run
+%% docs:diagrams`, 2026-11-22 22:53:47 · 231.644 B; contiene el runtime nodejs26.x y los dos
+%% statements de la Function URL, TicketApiUrlInvokePermission y …ViaUrl — D-60/D-61). En la ola
+%% de cierre de Fase 04 solo se corrigio esta cabecera %% (el export de 16:50:16 · 226.324 B que
+%% citaba quedo superado por el de 22:53:47): cero cambios al cuerpo del diagrama, el render no
+%% varia. Fuente y export, sincronizados.
 %% Coherente con template.yaml A-01 (Fase 03) + A-09/D-60: 1 tabla, 1 funcion, 1 URL, 1 rol,
 %% 1 log group y 2 Permission. Region del destino: eu-west-1,
 %% declarada UNA sola vez en infra/deployment.env y cargada por load-deploy-config (D-54 / A-07);
