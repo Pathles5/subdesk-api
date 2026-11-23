@@ -137,7 +137,20 @@ if (Test-Path $indexPath) {
 }
 
 # --- Current phase spec and tasks ---
-if ($currentPhase) {
+# A phase whose INDEX state is `draft` is "not started yet" - that is literally what the
+# dash/empty state cell means (see the alias a few lines above). Demanding its spec.md, its
+# tasks.md and its own phase artefacts at that point contradicts the lifecycle in AGENTS.md
+# S1 (draft -> spec -> tasks -> implement -> verify -> decided -> approved): the spec IS the
+# first deliverable of a phase, so it cannot exist before the phase starts. Requiring it
+# anyway turned the gate red the instant the PREVIOUS phase was closed correctly, which
+# punished closing phases and pushed people to either rush the next spec or weaken the gate.
+# The requirement is therefore deferred until the phase leaves `draft`. A phase in
+# spec/tasks/implement/verify WITHOUT a spec.md still fails exactly as before - that is the
+# case this assert exists for, and it is not relaxed.
+if ($currentPhase -and $currentPhaseState -eq "draft") {
+    Add-Note ("Phase {0} is 'draft' (not started yet): its spec.md, tasks.md and the artefacts it introduces are not required until work on it starts." -f $currentPhase)
+}
+if ($currentPhase -and $currentPhaseState -ne "draft") {
     $specDir = Get-ChildItem (Join-Path $RepoRoot "docs/specs") -Directory -ErrorAction SilentlyContinue |
         Where-Object { $_.Name -match ("^" + $currentPhase + "-") }
     $specPath = $null
@@ -729,6 +742,12 @@ if (-not (Test-Path $docIndex)) {
 
 [int]$curPhaseNum = 0
 if ($currentPhase) { [int]::TryParse($currentPhase, [ref]$curPhaseNum) | Out-Null }
+# Artefacts introduced BY a phase (`from = N`) are only mandatory once phase N has actually
+# started. A phase still in `draft` has not begun, so its own artefacts cannot be demanded
+# yet - that is also what I8 means by "nada vacio ni por adelantado". Artefacts belonging to
+# already-closed phases stay required and stay subject to the freshness check below.
+[int]$effectivePhaseNum = $curPhaseNum
+if ($currentPhaseState -eq "draft") { $effectivePhaseNum = $curPhaseNum - 1 }
 $lastClosedNum = 0
 if (Test-Path $indexPath) {
     foreach ($row in (Get-Content $indexPath -Encoding UTF8 | Where-Object { $_ -match '^\s*\|\s*\d+\s*\|' })) {
@@ -759,7 +778,7 @@ $docRequired = @(
 
 $docsChecked = 0
 foreach ($doc in $docRequired) {
-    if ($curPhaseNum -lt $doc.from) { continue }
+    if ($effectivePhaseNum -lt $doc.from) { continue }
     $p = Join-Path $RepoRoot $doc.rel
     if (-not (Test-Path $p)) {
         Add-Fail ("I8: required documentation missing since phase {0:D2}: {1} ({2})." -f $doc.from, $doc.rel, $doc.what)
@@ -810,7 +829,7 @@ if (Test-Path $openapiPath) {
     } else {
         Add-Note "I8: openapi.yaml declares $pathCount path(s)."
     }
-    if ($curPhaseNum -ge 2 -and -not (Test-Path (Join-Path $RepoRoot "tests/contract"))) {
+    if ($effectivePhaseNum -ge 2 -and -not (Test-Path (Join-Path $RepoRoot "tests/contract"))) {
         Add-Fail "I8: no tests/contract/ directory: the code-vs-openapi drift test is mandatory from phase 02 (I8b.4)."
     }
 }
