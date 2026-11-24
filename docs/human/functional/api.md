@@ -1,6 +1,6 @@
 # API en lenguaje humano — los 4 endpoints de SubDesk
 
-Actualizado: fase 04 · 2026-11-22
+Actualizado: fase 05 · 2026-11-23
 
 > Documento para quien **integra el panel frontend** u **opera la conexión con Telegram**. El contrato machine-readable vinculante es `docs/api/openapi.yaml` (OpenAPI 3.1, nace en Fase 01): si alguna vez este texto y el contrato difieren, **manda el contrato** — repórtalo, no lo asumas. Aquí no hay jerga de AWS: qué envías, qué recibes y qué casos raros existen.
 
@@ -10,12 +10,14 @@ Actualizado: fase 04 · 2026-11-22
 
 | Método | Ruta | Para qué sirve | Auth | Éxito |
 |---|---|---|---|---|
-| `POST` | `/webhook/telegram` | Telegram avisa de un mensaje nuevo → nace un ticket | cabecera `X-Telegram-Bot-Api-Secret-Token` | `200` siempre (creado o ignorado) |
-| `GET` | `/api/tickets` | cola de tickets para el panel, con filtro y paginación | cabecera `x-api-key` | `200` con `{ tickets, next_cursor }` |
-| `PATCH` | `/api/tickets/{id}` | cambiar el estado de un ticket (sin responder al usuario) | cabecera `x-api-key` | `200` con el ticket actualizado |
-| `POST` | `/api/tickets/{id}/reply` | responder al usuario **en su chat de Telegram** y cerrar el ticket | cabecera `x-api-key` | `200` con el ticket `RESOLVED` |
+| `POST` | `/webhook/telegram` | Telegram avisa de un mensaje nuevo → nace un ticket — **VIVO desde Fase 05** | cabecera `X-Telegram-Bot-Api-Secret-Token` | `200` siempre (creado o ignorado) |
+| `GET` | `/api/tickets` | cola de tickets para el panel, con filtro y paginación — *stub `501` hasta Fase 06* | cabecera `x-api-key` | `200` con `{ tickets, next_cursor }` |
+| `PATCH` | `/api/tickets/{id}` | cambiar el estado de un ticket (sin responder al usuario) — *stub `501` hasta Fase 07* | cabecera `x-api-key` | `200` con el ticket actualizado |
+| `POST` | `/api/tickets/{id}/reply` | responder al usuario **en su chat de Telegram** y cerrar el ticket — *stub `501` hasta Fase 08* | cabecera `x-api-key` | `200` con el ticket `RESOLVED` |
 
 Las cuatro rutas conviven en una sola URL pública. **El despliegue de la Fase 04 ya ocurrió** (pipeline — D-42; run #8 `45079697512`, stack `subdesk-api-dev` `UPDATE_COMPLETE`) y el host exacto **ya está fijado**: la URL viva es `https://ddndau6zrzk24hgglvag6435640jdxro.lambda-url.eu-west-1.on.aws/`, registrada también en el `README.md` de la raíz. La región — `eu-west-1` — es la declarada en `infra/deployment.env` (**D-54**). En los ejemplos de este documento se mantiene el placeholder genérico `https://SU-URL.lambda-url.eu-west-1.on.aws`, para que nadie copie y pegue contra el entorno real sin querer: al probar de verdad, sustitúyelo por la URL viva de arriba (es un endpoint público, sin credenciales en la URL; la autenticación va en cabeceras). El campo JSON `id` de la ruta es el identificador opaco del ticket (un UUID; trátalo como caja negra).
+
+**Estado de implementación (Fase 05, ola B — 2026-11-23):** `POST /webhook/telegram` **ya no es un stub**: la ingesta está implementada y verde en local (suite 149/149 y smoke 15/15 contra `pnpm run dev`) y será visible en la URL viva en cuanto se ejecute el próximo despliegue por la pipeline (tarea T-15 de la fase). Los otros tres endpoints **siguen respondiendo `501`** hasta las fases 06 (`GET`), 07 (`PATCH`) y 08 (`reply`).
 
 ### Autenticación, en dos frases
 
@@ -46,11 +48,35 @@ Respuesta: `200 {"received": true}` — y el ticket queda listo para aparecer en
 | `no_text` | el mensaje no trae texto (p. ej. solo foto o voz; los adjuntos no están en la v1) |
 | `empty_message` | el texto llega vacío |
 | `chat_not_found` | el update no trae el chat al que pertenece: sin chat no hay ticket posible |
-| `unsupported_update` | tipo de update que no consume el bot (p. ej. `callback_query`), o cuerpo que no se puede parsear / pasa del límite declarado de 64 KB |
+| `unsupported_update` | update que este backend no puede convertir en ticket: tipo de update que no consume el bot (p. ej. `callback_query`, `channel_post`, `edited_message`), `update_id` ausente o inválido, **cuerpo que no se puede parsear / supera el límite de 64 KB / declara charset o content-encoding no soportados**, o texto de más de 4096 caracteres (**nunca se trunca**: o el mensaje íntegro, o nada). Desde la Fase 05 los rechazos del parser caen aquí (antes respondían `internal_error`): es el cierre de la divergencia con el contrato que la spec 04 A-10 aplazó a esta fase |
 | `duplicate` | este `update_id` ya se procesó antes (es el reintento legítimo de Telegram: no se duplica el ticket) |
-| `internal_error` | algo interno falló; el guard del webhook lo convierte en `200` para cerrar el bucle de reintentos y el suceso queda en los logs, no en la respuesta |
+| `internal_error` | algo interno falló; el guard del webhook lo convierte en `200` para cerrar el bucle de reintentos y el suceso queda en los logs, no en la respuesta. Desde **D-70** el secreto inválido (→ `403`) y el cuerpo roto (→ `unsupported_update`) ya no caen aquí |
 
-Las definiciones de los seis motivos están **congeladas** en la spec de Fase 01 §5.1 (enmienda A-01): la Fase 05 las implementa tal cual, no las reabre (la renumeracion pipelines-first D-42 movio la ingesta de la antigua Fase 04 a la 05). Para ti como consumidor los tres primeros significan lo mismo: `200`, ningún ticket creado, no reintentes.
+Las definiciones de los seis motivos están **congeladas** en la spec de Fase 01 §5.1 (enmienda A-01): la Fase 05 las **implementó tal cual** (ola B, 2026-11-23), no las reabre (la renumeracion pipelines-first D-42 movio la ingesta de la antigua Fase 04 a la 05). Para ti como consumidor los tres primeros significan lo mismo: `200`, ningún ticket creado, no reintentes.
+
+### Precedencia de motivos (tabla congelada, spec 05 §5.1)
+
+Cuando varias cosas fallan a la vez, la respuesta la decide la **primera regla que casa**, en este orden exacto:
+
+| # | Qué se comprueba | Respuesta |
+|---|---|---|
+| 0 | Secreto de la cabecera `X-Telegram-Bot-Api-Secret-Token` ausente o distinto de `TELEGRAM_WEBHOOK_SECRET` (comparación en tiempo constante sobre digests SHA-256) | **`403`** `{"error":{"code":"FORBIDDEN","message":"invalid webhook secret"}}` |
+| 1 | Cuerpo no parseable, > **64 KB**, charset no soportado o content-encoding no soportado | `200 {"ignored":"unsupported_update"}` |
+| 2 | `update_id` ausente o no entero ≥ 1 | `200 {"ignored":"unsupported_update"}` |
+| 3 | `message` ausente o no objeto (`callback_query`, `channel_post`, `edited_message`, `poll`, `inline_query`, …) | `200 {"ignored":"unsupported_update"}` |
+| 4 | `message.chat.id` ausente o no utilizable (no entero, o fuera de `^-?[0-9]{1,20}$`) | `200 {"ignored":"chat_not_found"}` |
+| 5 | `message.text` ausente o no string | `200 {"ignored":"no_text"}` |
+| 6 | `message.text` vacío tras `trim` | `200 {"ignored":"empty_message"}` |
+| 7 | `message.text` de más de **4096** caracteres (defensivo: Telegram no lo excede) | `200 {"ignored":"unsupported_update"}` + log — **nunca se trunca** |
+| 8 | Escritura condicional (`PutItem` con `attribute_not_exists(id)`) correcta | `200 {"received":true}` |
+| 9 | Esa escritura falla porque el `update_id` ya estaba | `200 {"ignored":"duplicate"}` |
+| 10 | Cualquier otra excepción | `200 {"ignored":"internal_error"}` + log **sin contenido** |
+
+Tres consecuencias prácticas:
+
+- **La dedupe por `update_id` no cuesta ninguna lectura** (D-19): no se consulta nada antes de escribir; la deduplicación **es** la propia escritura condicional. Mismo `update_id` ⇒ `duplicate`, sin segundo ticket y sin carreras entre reintentos concurrentes (uno gana y el otro cae en `duplicate`). La escritura fallida **sí consume capacidad** (~2 WCU, igual que la exitosa): irrelevante con 25 WCU provisionados y el volumen previsto.
+- **El texto del ticket se guarda íntegro, sin `trim`, y nunca se trunca**: si superara los 4096 caracteres, el update se ignora (regla 7) en vez de guardar contenido corrupto.
+- **El límite de 64 KB** aplica al cuerpo entero del webhook (igual que en `/api/*`); superarlo no produce un error sino `200 {"ignored":"unsupported_update"}`.
 
 Ejemplos de ignoro:
 
@@ -59,7 +85,7 @@ Ejemplos de ignoro:
 { "ignored": "duplicate" }
 ```
 
-**El único `403` del webhook:** si la cabecera `X-Telegram-Bot-Api-Secret-Token` falta o no coincide. No rompe la promesa de arriba porque los reintentos legítimos de Telegram **siempre** llevan el secreto registrado; quien falla el secreto no es Telegram reintentando un update, es un tercero, y rechazarlo no provoca bucle de reintento alguno. Si al desplegar ves `403` masivos, casi seguro es un secreto de despliegue distinto del registrado con `setWebhook` (se comprueba en la prueba E2E de Fase 09).
+**El único `403` del webhook:** si la cabecera `X-Telegram-Bot-Api-Secret-Token` falta o no coincide — **independientemente de lo que lleve el cuerpo**: desde **D-70** el gate del secreto se comprueba **antes** de parsear el cuerpo, así que «secreto erróneo + cuerpo roto» también responde `403` (antes respondía `200 {"ignored":"internal_error"}`); es lo que el contrato siempre prescribió (`openapi.yaml:54`). No rompe la promesa de arriba porque los reintentos legítimos de Telegram **siempre** llevan el secreto registrado; quien falla el secreto no es Telegram reintentando un update, es un tercero, y rechazarlo no provoca bucle de reintento alguno. Si al desplegar ves `403` masivos, casi seguro es un secreto de despliegue distinto del registrado con `setWebhook` (se comprueba en la prueba E2E de Fase 09).
 
 Respuestas de este endpoint: `200` (creado o ignorado) y `403` (secreto inválido). No hay más.
 
@@ -88,7 +114,7 @@ Respuesta `200` (ejemplo con un ticket pendiente, aún sin respuesta):
 {
   "tickets": [
     {
-      "id": "2f6cf473-16d5-5b61-9a3f-08e1a0d1f4e7",
+      "id": "f53dea7a-383f-510d-b6ff-eddd5270f4b6",
       "telegram_chat_id": "112233445",
       "username": "ana_example",
       "message_content": "Hola, mi suscripcion no se ha renovado.",
@@ -105,8 +131,8 @@ Respuesta `200` (ejemplo con un ticket pendiente, aún sin respuesta):
 Tres cosas que conviene saber:
 
 - **`username` y `response_text` pueden faltar** en el JSON: el primero si el usuario de Telegram no tiene nombre de usuario ni nombre propio; el segundo hasta que alguien responde el ticket. El resto de campos están siempre.
-- **El cursor es opaco**: es un secreto interno de paginación del almacén. No lo parses, no lo generes tú, no asumas nada de su contenido; solo reenvíalo tal cual en `cursor` para pedir la siguiente página, y `next_cursor: null` significa fin de la cola.
-- **El `id` de los ejemplos es ilustrativo**: no es el UUID v5 real de ningún `update_id` (el namespace `TG_UPDATE_NS` se congela en la Fase 05 con la ingesta, D-39 - la renumeracion pipelines-first D-42 movio la ingesta de la antigua Fase 04 a la 05, y entonces se regeneran los ejemplos, D-35). Para tu panel es simplemente una cadena opaca que no cambias tú.
+- **El cursor es opaco**: es un secreto interno de paginación del almacén. No lo parses, no lo generes tú, no asumas nada de su contenido; solo reenvíalo tal cual en `cursor` para pedir la siguiente página, y `next_cursor: null` significa fin de la cola. (El ejemplo sigue siendo un placeholder opaco **a propósito**: la codificación del cursor nace en la Fase 06 con el `GET` real; inventar un valor ahora sería congelar algo que aún no existe.)
+- **El `id` de los ejemplos ya es real** (Fase 05): está derivado con `uuidv5(TG_UPDATE_NS, "tg:" + update_id)` bajo el namespace congelado `TG_UPDATE_NS = 57ef65e4-85f4-5f1d-a5c3-e55bd593494d` (D-69/D-75; el literal manda sobre la receta). `f53dea7a-383f-510d-b6ff-eddd5270f4b6` corresponde a `update_id 482391756`, y `7e364a81-28ea-5d7e-b335-21c4ab8e122f` a `update_id 482391757`. El ejemplo ilustrativo anterior (`2f6cf473-…`) quedó retirado. Para tu panel el `id` sigue siendo una cadena opaca que no cambias tú.
 - **Nota de honestidad sobre el orden:** `created_at` descendente está garantizado *dentro de cada página*. Mientras la cola esté en el volumen objetivo (hasta unos 1.000–2.000 tickets), una sola página cubre todo y el matiz no se nota. Si el volumen crece, el orden entre páginas puede no ser estricto; la respuesta prevista es una mejora interna del servidor (migrar a índice y `Query`, fase futura), **no** un cambio de contrato. Tu panel puede tratar `next_cursor` como única forma de avanzar.
 
 Respuestas: `200`, `400` (filtros inválidos), `401` (falta `x-api-key`), `403` (clave incorrecta).
@@ -118,7 +144,7 @@ Respuestas: `200`, `400` (filtros inválidos), `401` (falta `x-api-key`), `403` 
 **Para qué sirve:** marcar un ticket como atendido (`IN_PROGRESS`) o cerrarlo administrativamente (`RESOLVED`, **sin** responder al usuario; el cierre con respuesta es `reply`).
 
 ```bash
-curl -X PATCH "https://SU-URL.lambda-url.eu-west-1.on.aws/api/tickets/2f6cf473-16d5-5b61-9a3f-08e1a0d1f4e7" \
+curl -X PATCH "https://SU-URL.lambda-url.eu-west-1.on.aws/api/tickets/f53dea7a-383f-510d-b6ff-eddd5270f4b6" \
   -H "x-api-key: SU_CLAVE" \
   -H "content-type: application/json" \
   -d '{"status":"IN_PROGRESS"}'
@@ -141,7 +167,7 @@ Respuestas: `200`, `400`, `401`, `403`, `404`.
 **Para qué sirve:** escribir la respuesta al usuario **en su chat de Telegram** y cerrar el ticket. Es el único camino que produce `RESOLVED` con mensaje entregado.
 
 ```bash
-curl -X POST "https://SU-URL.lambda-url.eu-west-1.on.aws/api/tickets/2f6cf473-16d5-5b61-9a3f-08e1a0d1f4e7/reply" \
+curl -X POST "https://SU-URL.lambda-url.eu-west-1.on.aws/api/tickets/f53dea7a-383f-510d-b6ff-eddd5270f4b6/reply" \
   -H "x-api-key: SU_CLAVE" \
   -H "content-type: application/json" \
   -d '{"response_text":"Hola Ana: he revisado tu caso y la suscripcion queda renovada 30 dias mas."}'
@@ -195,7 +221,7 @@ Los cinco rechazos del parser de cuerpo en **`/api/*`** son también `400 VALIDA
 
 El quinto caso es el que más cuesta entender: llega con `err.type === null` y `status 400`, así que lo cubre un respaldo **acotado a `status === 400`** — no a «cualquier 4xx»: un `404`/`409` que cayera ahí se convertiría en un `VALIDATION_ERROR` falso. Antes de este cambio, los cinco producían un **`500 INTERNAL`** provocable por cualquier cliente.
 
-**Esto aplica solo a `/api/*`.** En **`/webhook/telegram` NO aplica**: el contrato exige que allí cualquier cuerpo no parseable o excesivo se absorba como **`200 {"ignored": …}`** (nunca 4xx/5xx), para que Telegram no reintente en bucle (I5).
+**Esto aplica solo a `/api/*`.** En **`/webhook/telegram` NO aplica**: el contrato exige que allí cualquier cuerpo no parseable o excesivo se absorba como **`200 {"ignored":"unsupported_update"}`** — implementado desde la Fase 05 (ola B), cerrando la divergencia que la spec 04 A-10 aplazó: antes respondía `internal_error` — (nunca 4xx/5xx), para que Telegram no reintente en bucle (I5). La **única** excepción es el `403` del secreto, que desde **D-70** se evalúa antes que cualquier consideración sobre el cuerpo.
 
 El `500` no está declarado en ningún endpoint del contrato: es el fallback del envelope para lo inesperado. Si tu panel lo ve en `/api/*`, es un incidente nuestro, no un error de uso.
 
@@ -204,7 +230,7 @@ El `500` no está declarado en ningún endpoint del contrato: es el fallback del
 | Límite | Valor | Consecuencia práctica |
 |---|---|---|
 | Tiempo de respuesta de una petición | 30 s | cada llamada es síncrona y corta; no hay procesos largos por HTTP |
-| Payload de una petición | 6 MB (plataforma) · **64 KB (límite de la app)** | el límite de **64 KB** aplica a **todos** los cuerpos JSON — el webhook **y también `/api/*`** (D-62). Superarlo en `/api/*` responde `400 VALIDATION_ERROR` con `request body too large`; en el webhook se absorbe como `200 {"ignored": …}` |
+| Payload de una petición | 6 MB (plataforma) · **64 KB (límite de la app)** | el límite de **64 KB** aplica a **todos** los cuerpos JSON — el webhook **y también `/api/*`** (D-62). Superarlo en `/api/*` responde `400 VALIDATION_ERROR` con `request body too large`; en el webhook se absorbe como `200 {"ignored":"unsupported_update"}` |
 | `limit` de paginación | 1–100 (defecto 50) | no pidas páginas de 1.000 |
 | `message_content` / `response_text` | 1–4096 caracteres | el tamaño máximo de un mensaje de Telegram de texto |
 | Contenido del ticket en pantallas y logs | — | es **datos de usuario**: el servicio jamás lo loguea (política de logs D-18); cuídalo tú igual en el panel |

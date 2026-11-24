@@ -5,7 +5,7 @@
 # privilege role (D-24), explicit log group with 30-day retention (I2), and the
 # Lambda resource-policy statement that AuthType: NONE requires.
 # Secrets are NEVER stored here: they arrive as NoEcho Parameters injected in CI
-# with --parameter-overrides from GitHub Secrets (Fase 08 workflow).
+# with --parameter-overrides from GitHub Secrets (Fase 04 workflow).
 # Single region per stack: the target is declared once in infra/deployment.env (D-54); the template itself declares no region.
 # Validation gate: `cfn-lint template.yaml` (offline, no credentials — I7/D-31),
 # exit 0, no suppressed rules.
@@ -111,15 +111,22 @@ Resources:
       FunctionName: TicketApiFunction
       # Handler is ESM (package.json "type": "module"); nodejs26.x supports ESM
       # handlers natively. Runtime + architecture are the user's explicit decision
-      # D-61 (supersedes D-40): nodejs26.x is in PUBLIC PREVIEW on Lambda — AWS
-      # states preview runtimes are "not covered by the Lambda SLA or Technical
-      # Support, and should not be used for production workloads" (runtime GA was
-      # expected ~Dec 2026); the user assumes that risk verbatim. The local engine is
-      # v26.13.1 (measured with `node -v`, not inherited from the stale D-28 note that
-      # said v22.20.0), so the D-40 rationale (local engine == runtime, minimal
-      # dev/prod drift) STILL holds and parity is preserved — there is no accepted
-      # drift to record. check.ps1 "Runtime parity" keeps the CI Node major pinned to
-      # the runtime major and engines.node admitting it. arm64
+      # D-61 (supersedes D-40), taken 2026-11-22 while nodejs26.x was still in PUBLIC
+      # PREVIEW on Lambda: AWS then stated preview runtimes are "not covered by the
+      # Lambda SLA or Technical Support, and should not be used for production
+      # workloads" (runtime GA was expected ~Dec 2026), and the user assumed that
+      # risk verbatim. That history is preserved on purpose — it is why the runtime
+      # is the one it is. Status now: the preview is OVER. The official runtimes doc
+      # (docs.aws.amazon.com/lambda/latest/dg/lambda-runtimes.html) lists nodejs26.x
+      # as a SUPPORTED runtime — Node.js 26 on Amazon Linux 2023, deprecation date
+      # 2029-04-30 (verified by the explorer 2026-11-23 at that URL) — so the
+      # preview risk the user accepted is superseded by GA support; no property
+      # changes. The local engine is v26.13.1 (measured with `node -v`, not
+      # inherited from the stale D-28 note that said v22.20.0), so the D-40
+      # rationale (local engine == runtime, minimal dev/prod drift) STILL holds and
+      # parity is preserved — there is no accepted drift to record. check.ps1
+      # "Runtime parity" keeps the CI Node major pinned to the runtime major and
+      # engines.node admitting it. arm64
       # (Graviton) is chosen for price/performance, coherent with I2, and is safe
       # for this artifact: the ZIP carries zero native (.node) binaries — prod deps
       # are express + serverless-http, pure JS (the repo's only .node file is a
@@ -370,7 +377,7 @@ Resources:
 
 Outputs:
   FunctionUrl:
-    Description: Public HTTPS endpoint (the only one; D-27). Register it with setWebhook in Fase 08.
+    Description: Public HTTPS endpoint (the only one; D-27). Register it with setWebhook in Fase 09.
     Value: !GetAtt TicketApiUrlConfig.FunctionUrl
   TableName:
     Description: Single tickets table (PROVISIONED 25/25, I2/D-26).

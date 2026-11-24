@@ -6,11 +6,13 @@
 // Adding, removing or re-securing a route requires updating registry, routers and the
 // contract together — contract drift fails the gate.
 
+// `phase` records the phase that turns each endpoint into its real handler, in the
+// post-D-42 order (pipelines-first): 05 intake, 06 read, 07 mutate, 08 reply.
 export const ROUTES = [
-  { method: "POST", path: "/webhook/telegram", security: "webhook-secret", phase: 4 },
-  { method: "GET", path: "/api/tickets", security: "api-key", phase: 5 },
-  { method: "PATCH", path: "/api/tickets/:id", security: "api-key", phase: 6 },
-  { method: "POST", path: "/api/tickets/:id/reply", security: "api-key", phase: 7 },
+  { method: "POST", path: "/webhook/telegram", security: "webhook-secret", phase: 5 },
+  { method: "GET", path: "/api/tickets", security: "api-key", phase: 6 },
+  { method: "PATCH", path: "/api/tickets/:id", security: "api-key", phase: 7 },
+  { method: "POST", path: "/api/tickets/:id/reply", security: "api-key", phase: 8 },
 ];
 
 // Methods an OpenAPI path item may carry; reused by the contract test to walk doc.paths.

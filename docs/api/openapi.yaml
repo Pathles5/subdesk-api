@@ -5,7 +5,10 @@
 # la instalación de la devDep con versión exacta ocurre en Fase 02 — antes de eso, este archivo se valida a mano).
 # Diagramas: los .mmd/.svg del flujo por endpoint (api-flow) se crean en Fase 05, cuando exista la
 # implementación que representan (I8: nada vacío ni por adelantado); la exportación local es `pnpm run docs:diagrams` (@mermaid-js/mermaid-cli, D-33).
-# Actualizado: fase 04 · 2026-11-22
+# Actualizado: fase 05 · 2026-11-23 (T-13: ejemplos de TicketId regenerados con el TG_UPDATE_NS
+# congelado - el ejemplo es ahora el id REAL de update_id 482391756, D-69/D-75 - y descripcion del
+# schema con el literal del namespace. Cero cambios en rutas, metodos, codigos de estado ni schemas:
+# el diff fue de 2 lineas, C7 de la spec 05.)
 openapi: 3.1.0
 info:
   title: SubDesk API
@@ -341,10 +344,10 @@ components:
   schemas:
     TicketId:
       type: string
-      description: UUID (RFC 4122, variante v5 determinista de `tg:<update_id>`; namespace fijo `TG_UPDATE_NS`, se congela en `src/utils/ids.js` en la Fase 05 — primer consumidor real (D-39; la renumeracion pipelines-first D-42 movio la ingesta de la antigua Fase 04 a la 05) — y cambiarlo exige enmienda; D-19).
+      description: UUID (RFC 4122, variante v5 determinista de `tg:<update_id>`; namespace fijo `TG_UPDATE_NS = 57ef65e4-85f4-5f1d-a5c3-e55bd593494d`, **congelado** en `src/utils/ids.js` desde la Fase 05 - el literal manda sobre la receta que lo deriva (`uuidv5(NAMESPACE_URL, ...)`) porque un identificador derivado de una URL cambia si el repo se renombra o se transfiere, leccion D-50; cambiarlo exige enmienda y pierde la dedupe historica (D-19, D-69, D-75).
       pattern: "^[0-9a-f]{8}-[0-9a-f]{4}-5[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
       examples:
-        - "2f6cf473-16d5-5b61-9a3f-08e1a0d1f4e7"   # ilustrativo: NO es el v5 real de ningun update_id; los ejemplos de id/cursor se regeneran al congelar TG_UPDATE_NS en Fase 05 (D-35, D-39; la ingesta se movio de fase por D-42)
+        - "f53dea7a-383f-510d-b6ff-eddd5270f4b6"   # id REAL del update_id 482391756 (el del ejemplo de peticion): uuidv5(TG_UPDATE_NS, "tg:482391756"). TG_UPDATE_NS = 57ef65e4-85f4-5f1d-a5c3-e55bd593494d, congelado en src/utils/ids.js (D-69; el literal manda sobre la receta). Un test recalcula este ejemplo en vez de copiarlo (spec 05 C9). El UUID ilustrativo anterior quedo retirado por D-75: estaba mal calculado.
 
     TicketStatus:
       type: string

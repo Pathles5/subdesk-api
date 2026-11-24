@@ -4,10 +4,12 @@ import request from "supertest";
 
 import { createApp } from "../../src/app.js";
 import { loadConfig } from "../../src/config.js";
+import { createTicketRepositoryFake } from "../../src/repositories/ticketRepository.fake.js";
 
 // Fake values only (I4). The middleware under test must answer 401/403 BEFORE any
 // DynamoDB access exists (I4): in the scaffold the authenticated path ends in the 501
-// stub, which proves the request passed the gate.
+// stub, which proves the request passed the gate. Since phase 05 createApp REQUIRES a
+// ticket repository: the in-memory fake keeps this suite at zero AWS (D-23/I2).
 
 const FAKE_ADMIN_KEY = "test-admin-key-NO-REAL";
 const FAKE_BOT_TOKEN = "test-bot-token-NO-REAL";
@@ -20,7 +22,7 @@ const config = loadConfig({
   TELEGRAM_WEBHOOK_SECRET: FAKE_WH_SECRET,
 });
 
-const app = createApp({ config });
+const app = createApp({ config, ticketRepository: createTicketRepositoryFake() });
 
 test("GET /api/tickets without x-api-key -> 401 UNAUTHORIZED envelope", async () => {
   const res = await request(app).get("/api/tickets");

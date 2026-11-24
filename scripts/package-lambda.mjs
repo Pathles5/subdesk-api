@@ -15,9 +15,20 @@
 //
 // Constitution refs: I2 (zip <= 45 MB direct limit), I4 (no .env in artifact), D-30/D-31 (flat tree,
 // zero symlinks), I4b (prod deps exactly the package.json pins, nothing exotic).
+//
+// Byte-reproducibility (T-17 / D-73): the ZIP that actually gets deployed is the one `sam package`
+// builds from dist/lambda (dist/artifact.zip is FORENSIC only — deploy.yml uploads it for post-mortem
+// and never sends it to S3 as code). So what makes a push a no-op for CloudFormation is the staging
+// tree being byte-stable, and the dominant source of drift was timestamps: actions/checkout stamps
+// files with the run's time and fs.cpSync stamps copies with "now". Every entry of dist/lambda is
+// therefore normalized to a fixed epoch before the asserts run, and an assert verifies the
+// normalization actually took effect (fail-closed). Consequence: a docs-only push produces the same
+// artifact hash, `sam package` emits the same template, `sam deploy` finds no changes and
+// --no-fail-on-empty-changeset (deploy.yml) keeps the run green without touching the Lambda.
 import fs from "node:fs";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
+import { ARTIFACT_EPOCH_MS, normalizeMtimes, findNonNormalized, collectSortedRelPaths, findLockfileGaps } from "./package-lambda-lib.mjs";
 
 const ROOT = process.cwd();
 const DIST = path.join(ROOT, "dist");
@@ -65,6 +76,12 @@ fs.writeFileSync(
   ) + "\n",
 );
 
+// ---------- deterministic mtimes (T-17 / D-73) ----------
+// Runs AFTER every write into the staging tree and BEFORE the asserts, so nothing can re-stamp an
+// entry once it has been normalized. `sam package` reads these mtimes when it builds the deployed
+// ZIP, and the handoff tarball preserves them (tar -czf/-xzf keep mtimes).
+const stamped = normalizeMtimes(STAGE);
+
 // ---------- hard asserts (fail-closed) ----------
 const prodNames = Object.keys(pkg.dependencies ?? {});
 for (const name of prodNames) {
@@ -81,8 +98,9 @@ for (const dev of Object.keys(pkg.devDependencies ?? {})) {
 }
 // lockfile cross-check (text scan; js-yaml is a devDep and this job runs --prod — keep zero deps here)
 const lockRaw = fs.readFileSync(path.join(ROOT, "pnpm-lock.yaml"), "utf8");
-for (const [name, spec] of Object.entries(pkg.dependencies ?? {})) {
-  if (!lockRaw.includes(`${name}@${spec}:`)) fail(`${name}@${spec} not found as an exact entry in pnpm-lock.yaml`);
+// NOTE: the key FORM matters here — pnpm lockfile v9 quotes scoped keys. See findLockfileGaps (D-74).
+for (const key of findLockfileGaps(lockRaw, pkg.dependencies)) {
+  fail(`${key} not found as an exact entry in pnpm-lock.yaml (neither the bare nor the YAML-quoted key form)`);
 }
 // no env files anywhere in staging
 const envHits = [];
@@ -109,16 +127,33 @@ walk(STAGE, (_p, e) => {
 });
 if (links.length) fail(`symlinks found in staging (Lambda ZIP cannot contain them): ${links.slice(0, 5).join(", ")}${links.length > 5 ? "…" : ""}`);
 
-// ---------- zip ----------
+// mtime normalization took effect (T-17 / D-73): without this check the normalization above would
+// be a promise, not a guarantee. Negative is demonstrable — create a file after normalizeMtimes and
+// this returns it (see tests/pipeline/package-lambda.test.js).
+const notNormalized = findNonNormalized(STAGE);
+if (notNormalized.length) {
+  fail(`staging mtimes are NOT normalized to ${new Date(ARTIFACT_EPOCH_MS).toISOString()}: ${notNormalized.length} entry/entries, e.g. ${notNormalized.slice(0, 3).join(", ")} - the artifact would not be byte-reproducible and every push would re-deploy the Lambda`);
+} else {
+  note(`staging mtimes normalized to ${new Date(ARTIFACT_EPOCH_MS).toISOString()} across ${stamped} entries (byte-reproducible artifact)`);
+}
+
+// ---------- zip (FORENSIC copy: the deployed ZIP is the one `sam package` builds from STAGE) ----------
 if (!failures.length) {
-  fs.rmSync(ZIP, { force: true });
-  const z = spawnSync("zip", ["-r", "-q", ZIP, "."], { cwd: STAGE, encoding: "utf8" });
-  if (z.status !== 0) fail(`zip CLI failed (runner must provide it; this tool is CI-only by design): ${z.stderr ?? z.error ?? "unknown"}`);
+  // Sorted file list fed through stdin instead of `zip -r .`, so the archive does not depend on
+  // readdir order either, plus `-X` to drop the extra attributes (uid/gid) that differ per runner.
+  const zipEntries = collectSortedRelPaths(STAGE);
+  if (!zipEntries.length) fail("staging contains no files: nothing to archive");
+  else if (zipEntries.some((p) => p.includes("\n"))) fail("staging contains a filename with a newline: it cannot be fed to `zip -@` safely");
   else {
-    const size = fs.statSync(ZIP).size;
-    if (size < MIN_ZIP_BYTES) fail(`artifact.zip suspiciously small: ${size} B < ${MIN_ZIP_BYTES} B floor`);
-    if (size > MAX_ZIP_BYTES) fail(`artifact.zip exceeds 45 MB direct-upload guard: ${size} B`);
-    else note(`artifact.zip ${Math.round(size / 1024)} KB (limits: floor 250 KB / guard 45 MB)`);
+    fs.rmSync(ZIP, { force: true });
+    const z = spawnSync("zip", ["-q", "-X", ZIP, "-@"], { cwd: STAGE, encoding: "utf8", input: zipEntries.join("\n") + "\n" });
+    if (z.status !== 0) fail(`zip CLI failed (runner must provide it; this tool is CI-only by design): ${z.stderr ?? z.error ?? "unknown"}`);
+    else {
+      const size = fs.statSync(ZIP).size;
+      if (size < MIN_ZIP_BYTES) fail(`artifact.zip suspiciously small: ${size} B < ${MIN_ZIP_BYTES} B floor`);
+      if (size > MAX_ZIP_BYTES) fail(`artifact.zip exceeds 45 MB direct-upload guard: ${size} B`);
+      else note(`artifact.zip ${Math.round(size / 1024)} KB from ${zipEntries.length} sorted entries (limits: floor 250 KB / guard 45 MB)`);
+    }
   }
 }
 

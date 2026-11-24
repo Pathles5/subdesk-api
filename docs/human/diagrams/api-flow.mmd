@@ -2,9 +2,10 @@
 %% -> service -> repository, con los caminos de error.
 %% Actualizado: fase 05 · 2026-11-23 (nace con la Fase 05: ingesta POST /webhook/telegram dibujada
 %% VIVA con su orden de evaluacion congelado en spec 05 §5.1 - 11 reglas, primera que casa gana -;
-%% las otras tres rutas siguen en stub 501 y se dibujan como OBJETIVO con su fase: GET F06,
-%% PATCH F07, reply F08. D-70: el gate de secreto va ANTES del parser. D-62/D-68: adaptador
-%% serverless-http 4.0.0 y SDK empaquetado con la funcion.)
+%% las otras tres rutas siguen en stub 501: esos stubs son VIVOS (existen hoy y responden) y llevan
+%% su fase - GET F06, PATCH F07, reply F08 -; lo que se dibuja como OBJETIVO (discontinuo) son los
+%% handlers y el sendMessage que los sustituiran. D-70: el gate de secreto va ANTES del parser.
+%% D-62/D-68: adaptador serverless-http 4.0.0 y SDK empaquetado con la funcion.)
 %% Fuente versionada; el .svg se regenera con `pnpm run docs:diagrams` (D-33/D-41, local, sin CDN: I8d).
 flowchart TD
     TG["Telegram Bot API<br/>reintenta si no recibe 2xx;<br/>no conserva updates mas de 24 h"]
@@ -69,7 +70,7 @@ flowchart TD
     classDef objetivo fill:#fff8e1,stroke:#f9a825,stroke-dasharray:4 3;
     classDef err fill:#ffebee,stroke:#c62828;
     classDef ack fill:#e3f2fd,stroke:#1565c0;
-    class WH,SEC,PARSE,SVC,REPO,GUARD,UID,MSG,CHAT,TXT,TRIM,LEN vivo;
-    class STUB,SVC2,TGSEND,PANEL objetivo;
+    class WH,SEC,PARSE,SVC,REPO,GUARD,UID,MSG,CHAT,TXT,TRIM,LEN,STUB,API vivo;
+    class SVC2,TGSEND,PANEL objetivo;
     class E403,A401,A403,A400,A404 err;
     class OK200,IGNPU,IGNCF,IGNNT,IGNEM,IGNDU,IGNER ack;

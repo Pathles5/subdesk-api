@@ -15,10 +15,11 @@ export function createTicketsRouter({ config }) {
 
   router.use(createApiKeyMiddleware({ adminApiKey: config.adminApiKey }));
 
-  // Scaffold stubs: real handlers arrive in phases 05, 06 and 07 (registry.js is the source).
-  router.get("/", notImplemented(5));
-  router.patch("/:id", notImplemented(6));
-  router.post("/:id/reply", notImplemented(7));
+  // Scaffold stubs: real handlers arrive in phases 06, 07 and 08 (registry.js is the
+  // source; post-D-42 numbering — 05 intake, 06 read, 07 mutate, 08 reply).
+  router.get("/", notImplemented(6));
+  router.patch("/:id", notImplemented(7));
+  router.post("/:id/reply", notImplemented(8));
 
   return router;
 }

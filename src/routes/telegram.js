@@ -1,29 +1,40 @@
 import express from "express";
 
 import { createWebhookSecretMiddleware } from "../middleware/webhookGuard.js";
-import { notImplemented } from "../utils/http.js";
+import { sendJson } from "../utils/http.js";
 
-// routes/telegram.js — POST /webhook/telegram (public intake, phase 04 implements it).
-// Mounted by app.js at "/webhook/telegram" where the sub-tree also receives its local
-// error guard (webhookGuard, I5): exceptions raised inside THIS router must land there
-// and never reach the global handler.
+// routes/telegram.js — POST /webhook/telegram, the public intake (phase 05: real
+// handler, no longer a 501 stub). Mounted by app.js at "/webhook/telegram" where the
+// sub-tree also receives its local error guard (webhookGuard, I5): exceptions raised
+// inside THIS router — body-parser rejections and service/repository failures included —
+// land there and never reach the global handler.
 
 /**
- * @param {{ config: object }} deps injected by createApp (D-17: config arrives by DI).
+ * @param {{ config: object, ticketService: { ingestUpdate(update: unknown): Promise<object> } }} deps
+ *        injected by createApp (D-17: config arrives by DI; the service is built there
+ *        with the repository and the logger).
  */
-export function createTelegramRouter({ config }) {
+export function createTelegramRouter({ config, ticketService }) {
   const router = express.Router();
 
-  // Parsing lives INSIDE the guarded sub-tree (mounted before the global parser in
-  // app.js): a Telegram body that fails to parse throws here, webhookGuard absorbs it
-  // into the 2xx ack, and the frozen contract is honored from day one.
-  router.use(express.json({ limit: "64kb" }));
-
-  // D-21 / I5: the only non-2xx case of the webhook is a missing or wrong secret token.
+  // D-70: the secret gate runs BEFORE the body parser — the 403 must never depend on the
+  // body content, and JSON from unauthenticated senders is never parsed. Wrong secret
+  // plus broken body answers 403, exactly as openapi.yaml prescribes.
   router.use(createWebhookSecretMiddleware({ expectedSecret: config.telegramWebhookSecret }));
 
-  // Scaffold stub: body extraction, dedup by update_id and ticket creation arrive in phase 04.
-  router.post("/", notImplemented(4));
+  // Parsing lives INSIDE the guarded sub-tree (mounted before the global parser in
+  // app.js): a Telegram body that fails to parse throws here and webhookGuard absorbs it
+  // into the contractual 200 {"ignored":"unsupported_update"} (spec 05 §5.1 rule 1).
+  router.use(express.json({ limit: "64kb" }));
+
+  // Handler with NO try/catch on purpose: every exception must bubble to webhookGuard,
+  // which owns the 2xx ack for internal errors (I5). Express 5 forwards rejected async
+  // handlers to the error middleware automatically. The outcome object is answered
+  // verbatim: {received:true} or {ignored:"<reason>"}, always 200.
+  router.post("/", async (req, res) => {
+    const outcome = await ticketService.ingestUpdate(req.body);
+    sendJson(res, 200, outcome);
+  });
 
   return router;
 }
