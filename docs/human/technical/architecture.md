@@ -1,6 +1,6 @@
 # Arquitectura técnica — SubDesk API
 
-Actualizado: fase 05 · 2026-11-23
+Actualizado: fase 05 · 2026-11-25
 
 > Documento para quien va a mantener el código. Las decisiones con su historia están en `DECISIONS.md` (se enlazan por ID); los criterios por fase están en `docs/specs/`. El contrato de la API se publica en `docs/api/openapi.yaml` (nace en Fase 01).
 
@@ -71,7 +71,7 @@ src/
     ids.js          # [VIVO Fase 05, ola A] UUID v5 determinista con node:crypto (D-19) + TG_UPDATE_NS congelado (D-69; ejemplo corregido por D-75)
     time.js         # [VIVO Fase 05, ola A] created_at/updated_at ISO 8601 UTC
   config.js         # [VIVO] única lectura de process.env
-tests/              # [VIVO] unitarios de middleware/config + supertest sobre createApp() + tests a nivel de ADAPTADOR (lambda.adapter.test.js, D-62) + test de contrato OpenAPI (segunda mitad ACTIVA para el webhook desde T-11) + tests de pipeline (pre-vuelo, workflows, $GITHUB_ENV, package-lambda) + —Fase 05 ola A— unitarios de utils (ids/time/validation) y del repositorio (misma tabla de comportamiento contra real con stub y fake) + —Fase 05 ola B— services/ticketService (27), routes/telegram (13), contract/mounting (5) y ampliaciones de adaptador/smoke/contrato/guards; suite 149/149
+tests/              # [VIVO] unitarios de middleware/config + supertest sobre createApp() + tests a nivel de ADAPTADOR (lambda.adapter.test.js, D-62) + test de contrato OpenAPI (segunda mitad ACTIVA para el webhook desde T-11) + tests de pipeline (pre-vuelo, workflows, $GITHUB_ENV, package-lambda, artifact-asserts) + —Fase 05 ola A— unitarios de utils (ids/time/validation) y del repositorio (misma tabla de comportamiento contra real con stub y fake) + —Fase 05 ola B— services/ticketService (27), routes/telegram (13), contract/mounting (5) y ampliaciones de adaptador/smoke/contrato/guards; suite 157/157 — 47 al cierre de F04 + 31 de la ola A + 9 de package-lambda (D-73/D-74) + 58 de la ola B y su ronda de corrección + 8 de la réplica local de asserts de empaquetado y del stripper (D-78); desglose, en technical/operations.md
 template.yaml       # [VIVO] SAM: 1 tabla PROVISIONED + 1 Function + 1 AWS::Lambda::Url + 2 AWS::Lambda::Permission (D-60) + 1 rol + 1 AWS::Logs::LogGroup (spec 03 A-01/A-04)
 docs/human/         # esta documentación (I8)
 ```
@@ -131,4 +131,4 @@ Siete variables, todas a través de `src/config.js` (nunca `process.env` suelto 
 - **Futura:** migración a `PAY_PER_REQUEST` (**D-29**, exige OK explícito del usuario).
 - **Estado del registro — SNAPSHOT histórico fechado de la ola de cierre de la Fase 04 (2026-11-22), superado por el punto siguiente:** entradas registradas hasta **D-64** (las últimas: D-59 Sid del macro SAM, D-60 los dos statements de la Function URL — cerrado en producción, D-61 `nodejs26.x`/`arm64`, D-62 `serverless-http@4.0.0`, D-63/D-64 evidencia de coste I2); las «filas de pendientes» del snapshot anterior quedaron resueltas en sus fases (D-24 en F03, D-25 en F04). Próximo ID libre: **D-65**. La fuente es la tabla de `DECISIONS.md` y el punto de retomada de `INDEX.md`.
 
-**Registro vigente al 2026-11-23: hasta D-77 — tras D-73 (artefacto byte-reproducible), D-74 (lockfile con claves scoped) y D-75 (corrección del ejemplo derivado de `TG_UPDATE_NS`) se registran D-76 (ampliación puntual del visto de T-10, enmienda A-05 de spec 03) y D-77 (guardia de drift del smoke endurecida, con negativo demostrado); próximo ID libre D-78.** Las líneas anteriores («hasta D-64, próximo D-65», «hasta D-72, próximo D-73» y «hasta D-75, próximo D-76») quedan como *snapshots* fechados; lo vinculante es este registro y su fuente, `DECISIONS.md`/`INDEX.md`.
+**Registro vigente al 2026-11-25: hasta D-78 — tras D-73 (artefacto byte-reproducible), D-74 (lockfile con claves scoped) y D-75 (corrección del ejemplo derivado de `TG_UPDATE_NS`) se registran D-76 (ampliación puntual del visto de T-10, enmienda A-05 de spec 03), D-77 (guardia de drift del smoke endurecida, con negativo demostrado) y D-78 (assert de empaquetado consciente de comentarios + réplica local de los asserts estáticos, tras el run #13 rojo); próximo ID libre D-79.** Las líneas anteriores («hasta D-64, próximo D-65», «hasta D-72, próximo D-73» y «hasta D-75, próximo D-76») quedan como *snapshots* fechados; lo vinculante es este registro y su fuente, `DECISIONS.md`/`INDEX.md`.

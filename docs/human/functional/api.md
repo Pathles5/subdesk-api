@@ -1,6 +1,6 @@
 # API en lenguaje humano — los 4 endpoints de SubDesk
 
-Actualizado: fase 05 · 2026-11-23
+Actualizado: fase 05 · 2026-11-25
 
 > Documento para quien **integra el panel frontend** u **opera la conexión con Telegram**. El contrato machine-readable vinculante es `docs/api/openapi.yaml` (OpenAPI 3.1, nace en Fase 01): si alguna vez este texto y el contrato difieren, **manda el contrato** — repórtalo, no lo asumas. Aquí no hay jerga de AWS: qué envías, qué recibes y qué casos raros existen.
 
@@ -17,7 +17,7 @@ Actualizado: fase 05 · 2026-11-23
 
 Las cuatro rutas conviven en una sola URL pública. **El despliegue de la Fase 04 ya ocurrió** (pipeline — D-42; run #8 `45079697512`, stack `subdesk-api-dev` `UPDATE_COMPLETE`) y el host exacto **ya está fijado**: la URL viva es `https://ddndau6zrzk24hgglvag6435640jdxro.lambda-url.eu-west-1.on.aws/`, registrada también en el `README.md` de la raíz. La región — `eu-west-1` — es la declarada en `infra/deployment.env` (**D-54**). En los ejemplos de este documento se mantiene el placeholder genérico `https://SU-URL.lambda-url.eu-west-1.on.aws`, para que nadie copie y pegue contra el entorno real sin querer: al probar de verdad, sustitúyelo por la URL viva de arriba (es un endpoint público, sin credenciales en la URL; la autenticación va en cabeceras). El campo JSON `id` de la ruta es el identificador opaco del ticket (un UUID; trátalo como caja negra).
 
-**Estado de implementación (Fase 05, ola B — 2026-11-23):** `POST /webhook/telegram` **ya no es un stub**: la ingesta está implementada y verde en local (suite 149/149 y smoke 15/15 contra `pnpm run dev`) y será visible en la URL viva en cuanto se ejecute el próximo despliegue por la pipeline (tarea T-15 de la fase). Los otros tres endpoints **siguen respondiendo `501`** hasta las fases 06 (`GET`), 07 (`PATCH`) y 08 (`reply`).
+**Estado de implementación (Fase 05, ola B — 2026-11-23):** `POST /webhook/telegram` **ya no es un stub**: la ingesta está implementada y verde en local (suite 157/157 y smoke 15/15 contra `pnpm run dev`) y será visible en la URL viva en cuanto se ejecute el próximo despliegue por la pipeline (tarea T-15 de la fase). Los otros tres endpoints **siguen respondiendo `501`** hasta las fases 06 (`GET`), 07 (`PATCH`) y 08 (`reply`).
 
 ### Autenticación, en dos frases
 

@@ -15,6 +15,8 @@ import {
   findNonNormalized,
   collectSortedRelPaths,
   findLockfileGaps,
+  stripJsComments,
+  readsProcessEnv,
 } from "../../scripts/package-lambda-lib.mjs";
 
 function withFixture(build, run) {
@@ -156,4 +158,40 @@ test("a dependency missing altogether is reported, and an empty manifest reports
   assert.deepEqual(findLockfileGaps(LOCKFILE, { lodash: "4.17.21" }), ["lodash@4.17.21"]);
   assert.deepEqual(findLockfileGaps(LOCKFILE, {}), []);
   assert.deepEqual(findLockfileGaps(LOCKFILE, undefined), []);
+});
+
+// ---------- D-78: comment-aware process.env assert ----------
+// Run #13 (45502655048) died in the CI `package` job because a COMMENT in src/lambda.js documented
+// the D-17 rule and the assert scanned raw text. ESLint (the real enforcement) ignores comments, so
+// the six local gates were green while CI went red. These tests pin the corrected semantics.
+
+test("stripJsComments drops line and block comments, keeps strings and the line structure", () => {
+  const src = [
+    "const a = 1; // process.env.SECRET",
+    "/* process.env.HIDDEN",
+    "   still inside the block comment */",
+    'const b = "process.env inside a string literal";',
+    "const c = `tpl // not a comment`;",
+  ].join("\n");
+  const out = stripJsComments(src);
+  assert.equal(out.split("\n").length, src.split("\n").length, "line count must survive (readable diffs)");
+  assert.equal(out.includes("// process.env.SECRET"), false);
+  assert.equal(out.includes("still inside the block comment"), false);
+  assert.equal(out.includes('"process.env inside a string literal"'), true, "strings are kept verbatim: fail-closed");
+  assert.equal(out.includes("tpl // not a comment"), true);
+});
+
+test("readsProcessEnv ignores prose but still catches every real read", () => {
+  // the exact shape that reddened run #13: a comment DOCUMENTING the rule, no real read
+  assert.equal(
+    readsProcessEnv("// config.js stays the single reader of process.env in OUR code\nexport const handler = () => {};"),
+    false,
+  );
+  assert.equal(readsProcessEnv("/* process.env */\nconst x = 1;"), false);
+  // real reads must still be caught, with or without comments around them
+  assert.equal(readsProcessEnv("const region = process.env.AWS_REGION;"), true);
+  assert.equal(readsProcessEnv("// harmless comment\nconst t = process.env.TABLE_NAME;"), true);
+  assert.equal(readsProcessEnv("const t = process . env . TABLE_NAME;"), true, "whitespace around the dots is still a read");
+  assert.equal(readsProcessEnv("const t = processEnv.TABLE_NAME;"), false, "processEnv is a different identifier");
+  assert.equal(readsProcessEnv("const t = process.environment;"), false, "not the env member");
 });

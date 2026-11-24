@@ -28,7 +28,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
-import { ARTIFACT_EPOCH_MS, normalizeMtimes, findNonNormalized, collectSortedRelPaths, findLockfileGaps } from "./package-lambda-lib.mjs";
+import { ARTIFACT_EPOCH_MS, normalizeMtimes, findNonNormalized, collectSortedRelPaths, findLockfileGaps, readsProcessEnv } from "./package-lambda-lib.mjs";
 
 const ROOT = process.cwd();
 const DIST = path.join(ROOT, "dist");
@@ -119,7 +119,7 @@ if (envHits.length) fail(`.env file(s) reached the staging: ${envHits.join(", ")
 // handler sanity: src/lambda.js exists and does not read process.env directly (D-17 single reader)
 const lambdaJs = path.join(STAGE, "src", "lambda.js");
 if (!fs.existsSync(lambdaJs)) fail("src/lambda.js missing (Handler: src/lambda.handler)");
-else if (/process\.env/.test(fs.readFileSync(lambdaJs, "utf8"))) fail("src/lambda.js touches process.env (must be config.js only — D-17)");
+else if (readsProcessEnv(fs.readFileSync(lambdaJs, "utf8"))) fail("src/lambda.js READS process.env (must be config.js only — D-17)");
 // symlink sweep (D-31 invariant): the ZIP must not contain reparse points
 const links = [];
 walk(STAGE, (_p, e) => {

@@ -91,6 +91,60 @@ function toPosix(p) {
 }
 
 /**
+ * Strip JS comments from source text, preserving strings and newlines.
+ *
+ * Why this exists (D-78): the "lambda.js must not read process.env" assert used to scan the RAW
+ * file, so a COMMENT documenting the rule ("config.js stays the single reader of process.env")
+ * tripped it and reddened the whole deploy — run #13 (`45502655048`) died in the `package` job on
+ * exactly that. ESLint's no-process-env, which is the real D-17 enforcement, ignores comments, so
+ * the local gates were green while CI went red. Same failure class as the docs placeholder detector
+ * firing on the Spanish word "TODO".
+ *
+ * Deliberate limitations, all fail-closed (they can only over-report, never under-report a real
+ * read): string literals are kept verbatim, so a literal "process.env" inside a string still trips
+ * the assert; and a regex literal containing `//` could be mistaken for a line comment. Neither
+ * pattern exists in src/, and both would be caught by the local replica of this assert in
+ * tests/pipeline/artifact-asserts.test.js before it can reach CI.
+ */
+export function stripJsComments(source) {
+  let out = "";
+  let state = "code"; // code | line | block | sq | dq | tpl
+  for (let i = 0; i < source.length; i++) {
+    const c = source[i];
+    const next = source[i + 1];
+    if (state === "code") {
+      if (c === "/" && next === "/") { state = "line"; i++; continue; }
+      if (c === "/" && next === "*") { state = "block"; i++; continue; }
+      if (c === "'") state = "sq";
+      else if (c === '"') state = "dq";
+      else if (c === "`") state = "tpl";
+      out += c;
+      continue;
+    }
+    if (state === "line") {
+      if (c === "\n") { state = "code"; out += c; }
+      continue;
+    }
+    if (state === "block") {
+      if (c === "*" && next === "/") { state = "code"; i++; continue; }
+      if (c === "\n") out += c; // keep line structure for readable diffs/line numbers
+      continue;
+    }
+    if (c === "\\") { out += c + (next ?? ""); i++; continue; } // honour escapes inside strings
+    if ((state === "sq" && c === "'") || (state === "dq" && c === '"') || (state === "tpl" && c === "`")) state = "code";
+    out += c;
+  }
+  return out;
+}
+
+/**
+ * True when the module actually READS process.env (comments excluded). D-17: only src/config.js may.
+ */
+export function readsProcessEnv(source) {
+  return /process\s*\.\s*env\b/.test(stripJsComments(source));
+}
+
+/**
  * Lockfile cross-check without a YAML parser: js-yaml is a devDependency and this script runs in a
  * `--prod` install, so it must stay zero-dep (text scan by design). Returns the `name@spec` entries
  * that cannot be found in the raw lockfile text.
